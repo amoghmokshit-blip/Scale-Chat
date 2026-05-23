@@ -47,5 +47,4 @@ AppData/
 *.img
 *.qcow2
 *.log
-*.json
 *.odl
