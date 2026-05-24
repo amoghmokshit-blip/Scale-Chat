@@ -95,12 +95,22 @@ export const mockChatRepository: ChatRepository = {
     const msg: Message =
       input.type === 'text'
         ? { ...base, type: 'text', text: input.text }
-        : {
-            ...base,
-            type: 'voice',
-            durationSec: input.durationSec,
-            waveform: input.waveform,
-          };
+        : input.type === 'voice'
+          ? {
+              ...base,
+              type: 'voice',
+              durationSec: input.durationSec,
+              waveform: input.waveform,
+              // Mock keeps the local file URI so the player works offline.
+              mediaUrl: input.uri,
+            }
+          : {
+              ...base,
+              type: 'image',
+              mediaUrl: input.uri,
+              width: input.width,
+              height: input.height,
+            };
 
     const list = s.messagesByThread[input.threadId] ?? [];
     s.messagesByThread = {
@@ -127,7 +137,11 @@ export const mockChatRepository: ChatRepository = {
     const tombstone = {
       ...prev,
       deletedAt: new Date().toISOString(),
-      ...(prev.type === 'text' ? { text: '' } : { durationSec: 0, waveform: [] }),
+      ...(prev.type === 'text'
+        ? { text: '' }
+        : prev.type === 'voice'
+          ? { durationSec: 0, waveform: [] }
+          : { mediaUrl: '', width: 0, height: 0 }),
     } as Message;
     s.messagesByThread[threadId] = [...list.slice(0, at), tombstone, ...list.slice(at + 1)];
     persist();

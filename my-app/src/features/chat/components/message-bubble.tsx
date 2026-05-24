@@ -6,6 +6,8 @@ import { Brand, FontWeight, Spacing } from '@/constants/theme';
 import { formatBubbleTime, formatDuration } from '@/lib/format-time';
 
 import type { Message } from '../types';
+import { ImageBubble } from './image-bubble';
+import { VoicePlayer } from './voice-player';
 
 type Props = {
   message: Message;
@@ -47,6 +49,39 @@ export function MessageBubble({
   const bg = isMine ? Brand.chatBubbleMine : Brand.chatBubbleTheirs;
   const color = isMine ? Brand.chatBubbleMineText : Brand.chatBubbleTheirsText;
   const isTombstone = message.deletedAt != null;
+
+  // Image bubbles render the image as the entire bubble surface — no rounded
+  // chat-bubble background underneath, no reply quote inside (we render the
+  // quote inline above the image for IMAGE messages to keep the layout clean).
+  if (message.type === 'image' && !isTombstone) {
+    return (
+      <View style={[styles.outer, { alignItems: isMine ? 'flex-end' : 'flex-start' }]}>
+        {replyTarget ? (
+          <View
+            style={[
+              styles.imageReplyQuote,
+              { borderLeftColor: isMine ? Brand.chatBubbleMine : Brand.chatHeaderTop },
+            ]}>
+            <ThemedText style={styles.imageReplyAuthor} numberOfLines={1}>
+              {replyTarget.senderId === 'me' ? 'You' : counterpartName ?? 'Them'}
+            </ThemedText>
+            <ThemedText style={styles.imageReplyBody} numberOfLines={1}>
+              {replyPreview(replyTarget)}
+            </ThemedText>
+          </View>
+        ) : null}
+        <ImageBubble message={message} isMine={isMine} onLongPress={onLongPress as never} />
+        <View
+          style={[
+            styles.metaRow,
+            isMine ? { justifyContent: 'flex-end' } : { justifyContent: 'flex-start' },
+          ]}>
+          {isMine ? <DeliveryTicks status={message.status} /> : null}
+          <ThemedText style={styles.meta}>{formatBubbleTime(message.createdAt)}</ThemedText>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.outer, { alignItems: isMine ? 'flex-end' : 'flex-start' }]}>
@@ -90,11 +125,7 @@ export function MessageBubble({
                 { color: isMine ? 'rgba(255,255,255,0.75)' : '#5C6068' },
               ]}
               numberOfLines={2}>
-              {replyTarget.deletedAt
-                ? 'This message was deleted'
-                : replyTarget.type === 'text'
-                  ? replyTarget.text
-                  : `🎤 Voice note · ${formatDuration(replyTarget.durationSec)}`}
+              {replyPreview(replyTarget)}
             </ThemedText>
           </View>
         ) : null}
@@ -116,9 +147,9 @@ export function MessageBubble({
           </View>
         ) : message.type === 'text' ? (
           <ThemedText style={[styles.text, { color }]}>{message.text}</ThemedText>
-        ) : (
-          <VoiceBlock message={message} isMine={isMine} />
-        )}
+        ) : message.type === 'voice' ? (
+          <VoicePlayer message={message} isMine={isMine} />
+        ) : null}
       </Pressable>
       <View
         style={[
@@ -132,43 +163,18 @@ export function MessageBubble({
   );
 }
 
-function VoiceBlock({
-  message,
-  isMine,
-}: {
-  message: Extract<Message, { type: 'voice' }>;
-  isMine: boolean;
-}) {
-  const tint = isMine ? '#EDEDED' : Brand.chatHeaderTop;
-  return (
-    <View style={styles.voiceRow}>
-      <View style={[styles.playBtn, { borderColor: tint }]}>
-        <Feather name="play" size={14} color={tint} style={{ marginLeft: 2 }} />
-      </View>
-      <View style={styles.waveform}>
-        {message.waveform.map((peak, i) => (
-          <View
-            key={`peak-${i}`}
-            style={[
-              styles.bar,
-              {
-                backgroundColor: tint,
-                height: Math.max(4, peak * 26),
-                opacity: i < message.waveform.length * 0.45 ? 1 : 0.45,
-              },
-            ]}
-          />
-        ))}
-      </View>
-      <ThemedText style={[styles.voiceTime, { color: tint }]}>
-        {formatDuration(message.durationSec)}
-      </ThemedText>
-    </View>
-  );
+/** Single-line preview shown inside a reply quote — depends on source kind. */
+function replyPreview(replyTarget: Message): string {
+  if (replyTarget.deletedAt) return 'This message was deleted';
+  if (replyTarget.type === 'text') return replyTarget.text;
+  if (replyTarget.type === 'voice') {
+    return `🎤 Voice note · ${formatDuration(replyTarget.durationSec)}`;
+  }
+  return '📷 Photo';
 }
 
 function DeliveryTicks({ status }: { status: Message['status'] }) {
-  if (status === 'sending') {
+  if (status === 'uploading' || status === 'sending') {
     return (
       <Feather name="clock" size={11} color={Brand.chatTimestamp} style={styles.tickIcon} />
     );
@@ -265,34 +271,25 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     marginRight: 4,
   },
-  voiceRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    minWidth: 220,
+  // Image-bubble reply quote — sits above the image since the image itself
+  // fills the whole bubble surface.
+  imageReplyQuote: {
+    borderLeftWidth: 3,
+    paddingLeft: 8,
+    paddingVertical: 2,
+    marginBottom: 4,
+    maxWidth: 240,
   },
-  playBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    borderWidth: 1.5,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  waveform: {
-    flex: 1,
-    height: 32,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-  },
-  bar: {
-    width: 2,
-    borderRadius: 1,
-  },
-  voiceTime: {
+  imageReplyAuthor: {
     fontSize: 12,
-    fontWeight: FontWeight.medium,
-    letterSpacing: -0.12,
+    fontWeight: FontWeight.semibold,
+    letterSpacing: -0.1,
+    color: '#979797',
+  },
+  imageReplyBody: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: FontWeight.regular,
+    color: '#979797',
   },
 });

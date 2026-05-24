@@ -1,0 +1,15 @@
+node_modules
+.tmp
+*.log
+.DS_Store
+.env
+.env.local
+dist
+.tsbuildinfo
+coverage
+.idea/workspace.xml
+
+# Workspace-managed lockfile lives at the root; nested ones are an error.
+my-app/package-lock.json
+apps/*/package-lock.json
+packages/*/package-lock.json

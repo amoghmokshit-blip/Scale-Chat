@@ -1,0 +1,20 @@
+{
+  "name": "scalechat",
+  "private": true,
+  "workspaces": [
+    "my-app",
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "api:dev": "npm --workspace=apps/api run dev",
+    "api:build": "npm --workspace=apps/api run build",
+    "api:start": "npm --workspace=apps/api run start",
+    "api:prisma": "npm --workspace=apps/api run prisma",
+    "shared:build": "npm --workspace=packages/shared run build",
+    "postinstall": "node scripts/link-expo-router.js"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

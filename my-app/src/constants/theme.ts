@@ -129,6 +129,27 @@ export const Brand = {
   chatActionLime: '#B3EF2B',
   chatActionLimeText: '#1B1B1B',
   chatReadTick: '#B3EF2B',
+  /**
+   * Attachment panel (Figma 1:3098) — bottom sheet with Camera / Gallery /
+   * Document / Contact / Location tiles. Dark slab so the tiles read against
+   * the dark thread body.
+   */
+  chatAttachmentSheetBg: '#1A1A1A',
+  chatAttachmentTileBg: '#2A2A2A',
+  chatAttachmentTileLabel: '#EDEDED',
+  chatAttachmentBackdrop: 'rgba(0,0,0,0.55)',
+  /**
+   * Voice recording overlay (Figma 1:3698) — pulsing red dot + timer + live
+   * waveform + slide-to-cancel hint.
+   */
+  chatRecordingDot: '#FF4D4D',
+  chatRecordingBg: '#1A1A1A',
+  chatRecordingHint: '#979797',
+  /** Image bubble placeholder while the asset is loading (matches dark thread). */
+  chatImagePlaceholder: '#2A2A2A',
+  /** Voice playback progress fill (lime for played, muted for unplayed). */
+  chatVoicePlayed: '#B3EF2B',
+  chatVoiceUnplayed: 'rgba(237,237,237,0.45)',
 } as const;
 
 export type BrandColor = keyof typeof Brand;

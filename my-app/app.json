@@ -35,6 +35,19 @@
             "imageWidth": 76
           }
         }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "ScaleChat needs microphone access to record voice notes."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "ScaleChat needs photo library access so you can share images in chats.",
+          "cameraPermission": "ScaleChat needs camera access so you can take photos to share in chats."
+        }
       ]
     ],
     "experiments": {

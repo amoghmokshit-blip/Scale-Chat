@@ -1,0 +1,10 @@
+# Every change to any file requires approval from both repository owners.
+# Combined with branch protection (`Require review from Code Owners` +
+# `Required approving review count: 2` + `Include administrators`) this
+# means a PR to dev / qa / prod cannot be merged until BOTH owners approve.
+#
+# If a third collaborator is added later, either tighten this list to keep
+# only the two of you, or restrict who can approve via branch-protection
+# rulesets — otherwise GitHub will accept any two collaborator approvals.
+
+*  @amoghmokshit-blip @Surya-slaychat

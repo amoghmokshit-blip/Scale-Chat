@@ -1,0 +1,14 @@
+/clanode_modules
+dist
+.env
+.env.local
+*.log
+.git
+**/.DS_Store
+**/.idea
+**/.vscode
+my-app/node_modules
+my-app/.expo
+my-app/ios
+my-app/android
+my-app/web-build

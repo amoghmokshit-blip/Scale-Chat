@@ -1,0 +1,284 @@
+// ScaleChat database schema.
+//
+// Scope today (per current product slice):
+//   - User (account-setup output)
+//   - RefreshToken with family-based rotation for replay detection
+//   - OtpRequest is a *log* table — the live OTP itself lives in Redis (5-min TTL)
+//   - SecurityEvent for audit / on-call paging hooks
+//
+// Future tables (chat, super-groups, payments) live behind their own migrations.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Users
+// ─────────────────────────────────────────────────────────────────────────────
+
+model User {
+  id          String   @id @default(uuid()) @db.Uuid
+  phoneE164   String   @unique @db.VarChar(16)
+  fullName    String   @db.VarChar(60)
+  bio         String?  @db.VarChar(160)
+  avatarUri   String?
+  isPremium   Boolean  @default(false)
+  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(6)
+
+  refreshTokens   RefreshToken[]
+  otpRequests     OtpRequest[]
+  securityEvents  SecurityEvent[]
+  ownedContacts   Contact[]      @relation("ContactOwner")
+  contactedBy     Contact[]      @relation("ContactTarget")
+  chatMemberships ChatMember[]
+  sentMessages    Message[]      @relation("MessageSender")
+  createdChats    Chat[]         @relation("ChatCreator")
+
+  @@index([phoneE164])
+  @@map("users")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Refresh tokens (family-based rotation)
+//
+// `familyId` is set on first verify; every rotation reuses the same familyId
+// while issuing a new token (`tokenHash`). When a refresh fails because the
+// presented token is already rotated, we revoke the WHOLE family (replay detection)
+// and emit a SecurityEvent.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model RefreshToken {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @db.Uuid
+  familyId     String   @db.Uuid
+  tokenHash    String   // argon2 hash of the opaque random token (raw token never stored)
+  deviceId     String   @db.VarChar(128)
+  // Set on rotate: this row points to its successor so replay detection can walk the chain.
+  rotatedToId  String?  @unique @db.Uuid
+  rotatedAt    DateTime? @db.Timestamptz(6)
+  revokedAt    DateTime? @db.Timestamptz(6)
+  expiresAt    DateTime @db.Timestamptz(6)
+  createdAt    DateTime @default(now()) @db.Timestamptz(6)
+  userAgent    String?  @db.VarChar(256)
+  ipAddress    String?  @db.VarChar(64)
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OTP request log
+//
+// The hashed OTP itself lives in Redis with a 5-minute TTL (cheap and TTLs itself
+// out). This table is a durable audit log — every request lands here so we can
+// reconstruct rate-limit reasoning even after Redis evicts the keys.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model OtpRequest {
+  id          String   @id @default(uuid()) @db.Uuid
+  phoneE164   String   @db.VarChar(16)
+  // Nullable: phone may not yet correspond to a user on first request.
+  userId      String?  @db.Uuid
+  requestId   String   @unique @db.Uuid
+  status      OtpStatus @default(SENT)
+  provider    String   @default("msg91") @db.VarChar(32)
+  providerRef String?  @db.VarChar(128)  // MSG91 request id (for support / log correlation)
+  ipAddress   String?  @db.VarChar(64)
+  userAgent   String?  @db.VarChar(256)
+  attempts    Int      @default(0)
+  expiresAt   DateTime @db.Timestamptz(6)
+  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+  verifiedAt  DateTime? @db.Timestamptz(6)
+
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([phoneE164, createdAt])
+  @@index([ipAddress, createdAt])
+  @@map("otp_requests")
+}
+
+enum OtpStatus {
+  SENT
+  VERIFIED
+  EXPIRED
+  FAILED
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Security events
+//
+// Append-only audit of anything an on-call would want to know about. The
+// PrivacyInterceptor and refresh-replay path both emit here. Long-term these
+// feed the anomaly detector mentioned in CLAUDE.md §4 "Layer 3".
+// ─────────────────────────────────────────────────────────────────────────────
+
+model SecurityEvent {
+  id         String   @id @default(uuid()) @db.Uuid
+  kind       SecurityEventKind
+  userId     String?  @db.Uuid
+  phoneE164  String?  @db.VarChar(16)
+  ipAddress  String?  @db.VarChar(64)
+  metadata   Json?
+  createdAt  DateTime @default(now()) @db.Timestamptz(6)
+
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([kind, createdAt])
+  @@index([userId])
+  @@map("security_events")
+}
+
+enum SecurityEventKind {
+  REFRESH_REPLAY_DETECTED
+  REFRESH_FAMILY_REVOKED
+  OTP_RATE_LIMIT_HIT
+  OTP_MAX_ATTEMPTS_HIT
+  SIGNOUT
+  PROFILE_UPDATED
+  PII_LEAK_DETECTED
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Contacts directory
+//
+// One row per (owner, target) pair. `contactUserId` is nullable so an owner
+// can save a phone that hasn't joined the platform yet — when the target
+// signs up, a separate worker job back-fills the userId.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Contact {
+  id              String   @id @default(uuid()) @db.Uuid
+  ownerUserId     String   @db.Uuid
+  contactUserId   String?  @db.Uuid
+  phoneE164       String   @db.VarChar(16)
+  displayName     String   @db.VarChar(60)
+  favouriteAt     DateTime? @db.Timestamptz(6)
+  createdAt       DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime @updatedAt @db.Timestamptz(6)
+
+  owner           User     @relation("ContactOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  contactUser     User?    @relation("ContactTarget", fields: [contactUserId], references: [id], onDelete: SetNull)
+
+  @@unique([ownerUserId, phoneE164])
+  @@index([ownerUserId, favouriteAt])
+  @@index([contactUserId])
+  @@map("contacts")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Chats / Messages
+//
+// `Chat` is the conversation envelope; `ChatMember` is the per-user view onto
+// it (read sequence, mute, favourite, archive). 1-on-1 uniqueness is enforced
+// in the `chats` service by deterministic member-pair hashing — Prisma alone
+// can't express a constraint over a join table.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Chat {
+  id                String     @id @default(uuid()) @db.Uuid
+  kind              ChatKind
+  /// Group / super-group title. Null for 1-on-1 (counterpart name is rendered
+  /// client-side from the other ChatMember's User row).
+  title             String?    @db.VarChar(80)
+  /// Audience description for Super Groups (shown to admin only).
+  description       String?    @db.VarChar(280)
+  avatarUri         String?
+  createdByUserId   String     @db.Uuid
+  lastMessageId     String?    @db.Uuid
+  lastMessageAt     DateTime?  @db.Timestamptz(6)
+  createdAt         DateTime   @default(now()) @db.Timestamptz(6)
+  updatedAt         DateTime   @updatedAt @db.Timestamptz(6)
+
+  createdBy         User       @relation("ChatCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  members           ChatMember[]
+  messages          Message[]  @relation("ChatMessages")
+  lastMessage       Message?   @relation("ChatLastMessage", fields: [lastMessageId], references: [id], onDelete: SetNull)
+
+  @@index([kind, lastMessageAt])
+  @@index([lastMessageAt])
+  @@map("chats")
+}
+
+enum ChatKind {
+  ONE_ON_ONE
+  GROUP
+  SUPER_GROUP
+}
+
+model ChatMember {
+  id                   String     @id @default(uuid()) @db.Uuid
+  chatId               String     @db.Uuid
+  userId               String     @db.Uuid
+  role                 MemberRole @default(MEMBER)
+  joinedAt             DateTime   @default(now()) @db.Timestamptz(6)
+  leftAt               DateTime?  @db.Timestamptz(6)
+  mutedUntil           DateTime?  @db.Timestamptz(6)
+  pinnedAt             DateTime?  @db.Timestamptz(6)
+  archivedAt           DateTime?  @db.Timestamptz(6)
+  favouriteAt          DateTime?  @db.Timestamptz(6)
+  /// BigInt sequence the member has read up to, drives unread counts.
+  lastReadSequence     BigInt     @default(0)
+
+  chat                 Chat       @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  user                 User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([chatId, userId])
+  @@index([userId, archivedAt])
+  @@index([userId, favouriteAt])
+  @@map("chat_members")
+}
+
+enum MemberRole {
+  ADMIN
+  MEMBER
+}
+
+model Message {
+  id                String       @id @default(uuid()) @db.Uuid
+  chatId            String       @db.Uuid
+  senderUserId      String       @db.Uuid
+  /// Idempotency: a second send from the same sender with the same clientId returns the existing row.
+  clientMessageId   String       @db.VarChar(64)
+  /// Per-chat monotonically increasing sequence. Allocated under advisory lock.
+  sequence          BigInt
+  kind              MessageKind
+  text              String?      @db.VarChar(4000)
+  mediaObjectKey    String?      @db.VarChar(256)
+  /// IMAGE only: intrinsic pixel width — drives bubble aspect-ratio pre-load.
+  imageWidth        Int?
+  /// IMAGE only: intrinsic pixel height.
+  imageHeight       Int?
+  durationSec       Int?
+  waveform          Json?
+  replyToMessageId  String?      @db.Uuid
+  createdAt         DateTime     @default(now()) @db.Timestamptz(6)
+  deletedAt         DateTime?    @db.Timestamptz(6)
+
+  chat              Chat         @relation("ChatMessages", fields: [chatId], references: [id], onDelete: Cascade)
+  sender            User         @relation("MessageSender", fields: [senderUserId], references: [id], onDelete: Restrict)
+  replyTo           Message?     @relation("MessageReply", fields: [replyToMessageId], references: [id], onDelete: SetNull)
+  replies           Message[]    @relation("MessageReply")
+  chatLastForChat   Chat[]       @relation("ChatLastMessage")
+
+  @@unique([senderUserId, clientMessageId])
+  @@unique([chatId, sequence])
+  @@index([chatId, createdAt])
+  @@map("messages")
+}
+
+enum MessageKind {
+  TEXT
+  VOICE
+  IMAGE
+  SYSTEM
+}

@@ -26,6 +26,24 @@ export type PeerPresence = {
  * row to the cache and notifies before the network round-trip). Optimistic
  * delete (tombstone) is the same — the repo flips `deletedAt` immediately.
  */
+export type SendImageInput = {
+  /** Device-local file URI from `expo-image-picker`. */
+  uri: string;
+  width: number;
+  height: number;
+  /** Defaults to `image/jpeg` if the picker doesn't report it. */
+  contentType?: string;
+  /** Picker may not report size; the repo `stat`s the file if missing. */
+  sizeBytes?: number;
+};
+
+export type SendVoiceInput = {
+  /** Device-local m4a/aac file URI from the voice recorder. */
+  uri: string;
+  durationSec: number;
+  waveform: number[];
+};
+
 export function useThread(threadId: string | undefined): {
   thread: Thread | null;
   messages: Message[];
@@ -33,6 +51,8 @@ export function useThread(threadId: string | undefined): {
   loadingOlder: boolean;
   hasMoreOlder: boolean;
   send: (text: string) => Promise<void>;
+  sendImage: (input: SendImageInput) => Promise<void>;
+  sendVoice: (input: SendVoiceInput) => Promise<void>;
   loadOlder: () => Promise<void>;
   /** Set the reply target; pass null to clear. */
   replyTo: (message: Message | null) => void;
@@ -151,11 +171,57 @@ export function useThread(threadId: string | undefined): {
           threadId,
           type: 'text',
           text: trimmed,
-          clientMessageId: `c-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
+          clientMessageId: newClientMessageId(),
           replyToMessageId: replyId,
         });
       } catch {
         // The repo has already marked the optimistic row as failed and notified.
+      }
+    },
+    [threadId, replyingTo]
+  );
+
+  const sendImage = useCallback(
+    async (input: SendImageInput) => {
+      if (!threadId) return;
+      const replyId = replyingTo?.id;
+      setReplyingTo(null);
+      try {
+        await chatRepository.sendMessage({
+          threadId,
+          type: 'image',
+          uri: input.uri,
+          width: input.width,
+          height: input.height,
+          contentType: input.contentType,
+          sizeBytes: input.sizeBytes,
+          clientMessageId: newClientMessageId(),
+          replyToMessageId: replyId,
+        });
+      } catch {
+        // Repo already flipped the optimistic row to `failed`.
+      }
+    },
+    [threadId, replyingTo]
+  );
+
+  const sendVoice = useCallback(
+    async (input: SendVoiceInput) => {
+      if (!threadId) return;
+      const replyId = replyingTo?.id;
+      setReplyingTo(null);
+      try {
+        await chatRepository.sendMessage({
+          threadId,
+          type: 'voice',
+          uri: input.uri,
+          durationSec: input.durationSec,
+          waveform: input.waveform,
+          clientMessageId: newClientMessageId(),
+          replyToMessageId: replyId,
+        });
+      } catch {
+        // Repo already flipped the optimistic row to `failed`.
       }
     },
     [threadId, replyingTo]
@@ -209,6 +275,8 @@ export function useThread(threadId: string | undefined): {
     loadingOlder,
     hasMoreOlder,
     send,
+    sendImage,
+    sendVoice,
     loadOlder,
     replyTo,
     replyingTo,
@@ -217,4 +285,9 @@ export function useThread(threadId: string | undefined): {
     peerTyping,
     peerPresence,
   };
+}
+
+/** Compact-but-unique id for the idempotency key the server uses to dedupe. */
+function newClientMessageId(): string {
+  return `c-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
 }

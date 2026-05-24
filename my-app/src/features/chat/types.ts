@@ -37,7 +37,14 @@ export type Thread = {
   isFavourite?: boolean;
 };
 
-export type MessageStatus = 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
+export type MessageStatus =
+  /** Media is uploading to R2 — bubble shows a progress spinner overlay. */
+  | 'uploading'
+  | 'sending'
+  | 'sent'
+  | 'delivered'
+  | 'read'
+  | 'failed';
 
 export type MessageBase = {
   id: string;
@@ -78,9 +85,29 @@ export type VoiceMessage = MessageBase & {
   durationSec: number;
   /** Waveform peaks (0..1). */
   waveform: number[];
+  /**
+   * R2 (or local) URL the player streams from. Optimistic / uploading rows
+   * carry the device-local `file://` URI; reconciled durable rows carry the
+   * public CDN URL the server computes from `mediaObjectKey`.
+   */
+  mediaUrl?: string;
 };
 
-export type Message = TextMessage | VoiceMessage;
+export type ImageMessage = MessageBase & {
+  type: 'image';
+  /**
+   * R2 public URL (or local `file://` while uploading). The bubble lays out
+   * against `width/height` to avoid jumpy paint before the asset finishes
+   * loading.
+   */
+  mediaUrl: string;
+  /** Intrinsic pixel width — drives bubble aspect ratio. */
+  width: number;
+  /** Intrinsic pixel height. */
+  height: number;
+};
+
+export type Message = TextMessage | VoiceMessage | ImageMessage;
 
 export type SendMessageInput =
   | {
@@ -93,8 +120,24 @@ export type SendMessageInput =
   | {
       threadId: string;
       type: 'voice';
+      /** Device-local file URI (e.g. `file:///.../voice-note.m4a`). The repo uploads to R2. */
+      uri: string;
       durationSec: number;
       waveform: number[];
+      clientMessageId: string;
+      replyToMessageId?: string;
+    }
+  | {
+      threadId: string;
+      type: 'image';
+      /** Device-local file URI returned by `expo-image-picker`. The repo uploads to R2. */
+      uri: string;
+      width: number;
+      height: number;
+      /** Mime type — defaults to `image/jpeg` if the picker omits it. */
+      contentType?: string;
+      /** Byte size if the picker reports it; otherwise the repo `stat`s the file. */
+      sizeBytes?: number;
       clientMessageId: string;
       replyToMessageId?: string;
     };

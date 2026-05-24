@@ -1,10 +1,13 @@
 import type {
   ChatDetailDto,
   ChatListResponse,
+  MediaUploadKind,
+  MediaUploadResponse,
   MessageDto,
   MessageListResponse,
   SendMessageBody,
 } from '@scalechat/shared';
+import * as LegacyFileSystem from 'expo-file-system/legacy';
 
 import { apiClient, ApiError } from '@/lib/api-client';
 import { chatSocket } from '@/lib/chat-socket';
@@ -113,9 +116,55 @@ function dtoToMessage(m: MessageDto, counterpartId: string): Message {
     deletedAt: m.deletedAt,
   };
   if (m.kind === 'VOICE') {
-    return { ...base, type: 'voice', durationSec: m.durationSec ?? 0, waveform: m.waveform ?? [] };
+    return {
+      ...base,
+      type: 'voice',
+      durationSec: m.durationSec ?? 0,
+      waveform: m.waveform ?? [],
+      mediaUrl: m.mediaUrl ?? undefined,
+    };
+  }
+  if (m.kind === 'IMAGE') {
+    return {
+      ...base,
+      type: 'image',
+      mediaUrl: m.mediaUrl ?? '',
+      width: m.imageWidth ?? 0,
+      height: m.imageHeight ?? 0,
+    };
   }
   return { ...base, type: 'text', text: m.text ?? '' };
+}
+
+// ─── Media upload helpers ────────────────────────────────────────────────────
+
+const DEFAULT_IMAGE_CONTENT_TYPE = 'image/jpeg';
+const VOICE_CONTENT_TYPE = 'audio/m4a';
+
+async function fileSize(uri: string): Promise<number> {
+  const info = await LegacyFileSystem.getInfoAsync(uri);
+  // FileInfo with `exists: true` has `size`. Fall back to 0 if the platform
+  // doesn't report it — server-side validation will still gate misuses.
+  return (info as { exists: true; size?: number }).size ?? 0;
+}
+
+async function requestUploadUrl(input: {
+  kind: MediaUploadKind;
+  contentType: string;
+  sizeBytes: number;
+}): Promise<MediaUploadResponse> {
+  return apiClient.post<MediaUploadResponse>('/media/upload-url', input);
+}
+
+async function putBytes(uploadUrl: string, fileUri: string, contentType: string): Promise<void> {
+  const res = await LegacyFileSystem.uploadAsync(uploadUrl, fileUri, {
+    httpMethod: 'PUT',
+    headers: { 'content-type': contentType },
+    uploadType: LegacyFileSystem.FileSystemUploadType.BINARY_CONTENT,
+  });
+  if (res.status < 200 || res.status >= 300) {
+    throw new Error(`media_upload_failed: HTTP ${res.status}`);
+  }
 }
 
 function previewToMessage(item: ChatListResponse['items'][number]): Message {
@@ -229,8 +278,12 @@ function ensureSocketWired(): void {
     cache.messages[at] = {
       ...prev,
       deletedAt: new Date().toISOString(),
-      // Zero the content so leftover text/voice can't be rendered.
-      ...(prev.type === 'text' ? { text: '' } : { durationSec: 0, waveform: [] }),
+      // Zero the content so leftover text/voice/image can't be rendered.
+      ...(prev.type === 'text'
+        ? { text: '' }
+        : prev.type === 'voice'
+          ? { durationSec: 0, waveform: [] }
+          : { mediaUrl: '', width: 0, height: 0 }),
     } as Message;
     notify();
   });
@@ -353,16 +406,18 @@ export const apiChatRepository: ChatRepository = {
   async sendMessage(input: SendMessageInput) {
     ensureSocketWired();
 
-    // 1. Optimistic insert with status:'sending'. The id IS the clientMessageId
-    //    so reconciliation by id Just Works when the server returns the durable
-    //    row (the messages.service path also stores clientMessageId).
+    // 1. Optimistic insert. For text the row goes straight to `sending`; for
+    //    media we start in `uploading` and flip to `sending` once the R2 PUT
+    //    completes. The id IS the clientMessageId so reconciliation by id
+    //    Just Works when the durable row comes back.
+    const isMedia = input.type === 'image' || input.type === 'voice';
     const optimisticBase = {
       id: input.clientMessageId,
       threadId: input.threadId,
       senderId: 'me' as const,
       sequence: Number.MAX_SAFE_INTEGER, // sorts to the bottom until reconciled
       createdAt: new Date().toISOString(),
-      status: 'sending' as MessageStatus,
+      status: (isMedia ? 'uploading' : 'sending') as MessageStatus,
       clientMessageId: input.clientMessageId,
       replyToMessageId: input.replyToMessageId ?? null,
       deletedAt: null,
@@ -370,10 +425,59 @@ export const apiChatRepository: ChatRepository = {
     const optimistic: Message =
       input.type === 'text'
         ? { ...optimisticBase, type: 'text', text: input.text }
-        : { ...optimisticBase, type: 'voice', durationSec: input.durationSec, waveform: input.waveform };
+        : input.type === 'voice'
+          ? {
+              ...optimisticBase,
+              type: 'voice',
+              durationSec: input.durationSec,
+              waveform: input.waveform,
+              mediaUrl: input.uri, // local preview
+            }
+          : {
+              ...optimisticBase,
+              type: 'image',
+              mediaUrl: input.uri, // local preview
+              width: input.width,
+              height: input.height,
+            };
     upsertMessage(input.threadId, optimistic);
     notify();
 
+    // 2. For media: presign → PUT to R2 → flip optimistic row to `sending`.
+    let mediaObjectKey: string | undefined;
+    if (input.type === 'image' || input.type === 'voice') {
+      try {
+        const contentType =
+          input.type === 'image' ? input.contentType ?? DEFAULT_IMAGE_CONTENT_TYPE : VOICE_CONTENT_TYPE;
+        const sizeBytes = input.type === 'image' && input.sizeBytes
+          ? input.sizeBytes
+          : await fileSize(input.uri);
+
+        const upload = await requestUploadUrl({
+          kind: input.type === 'image' ? 'IMAGE' : 'VOICE',
+          contentType,
+          sizeBytes,
+        });
+        await putBytes(upload.uploadUrl, input.uri, contentType);
+        mediaObjectKey = upload.objectKey;
+
+        // Flip uploading → sending so the bubble loses the spinner before the
+        // server ack arrives — feels snappier and matches WhatsApp behaviour.
+        const cache = getCache(input.threadId);
+        const at = cache.messages.findIndex((m) => m.id === input.clientMessageId);
+        if (at >= 0) {
+          const prev = cache.messages[at]!;
+          cache.messages[at] = { ...prev, status: 'sending' as MessageStatus } as Message;
+          notify();
+        }
+      } catch (err) {
+        markPendingFailed(input.threadId, input.clientMessageId);
+        notify();
+        throw err;
+      }
+    }
+
+    // 3. Compose the wire body for the send.
     const body: SendMessageBody =
       input.type === 'text'
         ? {
@@ -382,15 +486,25 @@ export const apiChatRepository: ChatRepository = {
             text: input.text,
             replyToMessageId: input.replyToMessageId,
           }
-        : {
-            clientMessageId: input.clientMessageId,
-            kind: 'VOICE',
-            durationSec: input.durationSec,
-            waveform: input.waveform,
-            replyToMessageId: input.replyToMessageId,
-          };
+        : input.type === 'voice'
+          ? {
+              clientMessageId: input.clientMessageId,
+              kind: 'VOICE',
+              mediaObjectKey,
+              durationSec: input.durationSec,
+              waveform: input.waveform,
+              replyToMessageId: input.replyToMessageId,
+            }
+          : {
+              clientMessageId: input.clientMessageId,
+              kind: 'IMAGE',
+              mediaObjectKey,
+              imageWidth: input.width,
+              imageHeight: input.height,
+              replyToMessageId: input.replyToMessageId,
+            };
 
-    // 2. Prefer the socket path (real-time + same advisory-locked sequence on the
+    // 4. Prefer the socket path (real-time + same advisory-locked sequence on the
     //    server). Fall back to REST so a degraded socket never blocks sends.
     let durable: MessageDto | null = null;
     if (chatSocket.isConnected()) {
@@ -418,7 +532,7 @@ export const apiChatRepository: ChatRepository = {
       }
     }
 
-    // 3. Reconcile cache with the durable row.
+    // 5. Reconcile cache with the durable row.
     const counterpartId = counterpartByChatId.get(input.threadId) ?? '';
     const domain = dtoToMessage(durable, counterpartId);
     reconcileSend(input.threadId, input.clientMessageId, domain);
@@ -437,7 +551,11 @@ export const apiChatRepository: ChatRepository = {
         cache.messages[at] = {
           ...prev,
           deletedAt: new Date().toISOString(),
-          ...(prev.type === 'text' ? { text: '' } : { durationSec: 0, waveform: [] }),
+          ...(prev.type === 'text'
+            ? { text: '' }
+            : prev.type === 'voice'
+              ? { durationSec: 0, waveform: [] }
+              : { mediaUrl: '', width: 0, height: 0 }),
         } as Message;
         notify();
       }

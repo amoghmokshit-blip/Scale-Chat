@@ -1,3 +1,4 @@
+import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import {
@@ -14,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { Brand } from '@/constants/theme';
+import { AttachmentSheet } from '@/features/chat/components/attachment-sheet';
 import { ChatHeader } from '@/features/chat/components/chat-header';
 import { Composer } from '@/features/chat/components/composer';
 import { DayDivider } from '@/features/chat/components/day-divider';
@@ -22,6 +24,7 @@ import {
   copyMessageText,
 } from '@/features/chat/components/message-action-sheet';
 import { MessageBubble } from '@/features/chat/components/message-bubble';
+import { VoiceRecorderOverlay } from '@/features/chat/components/voice-recorder-overlay';
 import { useThread } from '@/features/chat/hooks/use-thread';
 import { chatRepository } from '@/features/chat/data';
 import { formatDayLabel } from '@/lib/format-time';
@@ -58,6 +61,8 @@ export default function ChatThreadScreen() {
     thread,
     messages,
     send,
+    sendImage,
+    sendVoice,
     loading,
     loadOlder,
     loadingOlder,
@@ -72,6 +77,8 @@ export default function ChatThreadScreen() {
   const listRef = useRef<FlatList<ListItem>>(null);
 
   const [sheetMessage, setSheetMessage] = useState<Message | null>(null);
+  const [attachOpen, setAttachOpen] = useState(false);
+  const [recorderOpen, setRecorderOpen] = useState(false);
 
   // Index id → message so each reply bubble can look up its source O(1).
   const byId = useMemo(() => {
@@ -120,6 +127,42 @@ export default function ChatThreadScreen() {
     }
   }
 
+  async function handlePickImage(source: 'camera' | 'gallery') {
+    const perm =
+      source === 'camera'
+        ? await ImagePicker.requestCameraPermissionsAsync()
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert(
+        source === 'camera' ? 'Camera permission required' : 'Photos permission required',
+        'You can enable it in Settings to share photos in chats.',
+      );
+      return;
+    }
+    const result =
+      source === 'camera'
+        ? await ImagePicker.launchCameraAsync({
+            mediaTypes: ['images'],
+            quality: 0.85,
+            exif: false,
+          })
+        : await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ['images'],
+            quality: 0.85,
+            exif: false,
+          });
+    if (result.canceled) return;
+    const asset = result.assets[0];
+    if (!asset || !asset.uri) return;
+    await sendImage({
+      uri: asset.uri,
+      width: asset.width ?? 0,
+      height: asset.height ?? 0,
+      contentType: asset.mimeType,
+      sizeBytes: asset.fileSize,
+    });
+  }
+
   if (loading || !thread) {
     return (
       <View style={styles.root}>
@@ -162,6 +205,8 @@ export default function ChatThreadScreen() {
         <Composer
           onSend={send}
           onTyping={notifyTyping}
+          onAttach={() => setAttachOpen(true)}
+          onVoice={() => setRecorderOpen(true)}
           replyingTo={replyingTo}
           counterpartName={thread.counterpart.displayName}
           onCancelReply={() => replyTo(null)}
@@ -180,6 +225,21 @@ export default function ChatThreadScreen() {
           if (sheetMessage) void copyMessageText(sheetMessage);
         }}
         onDelete={handleDelete}
+      />
+
+      <AttachmentSheet
+        visible={attachOpen}
+        onClose={() => setAttachOpen(false)}
+        onPickCamera={() => void handlePickImage('camera')}
+        onPickGallery={() => void handlePickImage('gallery')}
+      />
+
+      <VoiceRecorderOverlay
+        visible={recorderOpen}
+        onClose={() => setRecorderOpen(false)}
+        onSend={(rec) =>
+          sendVoice({ uri: rec.uri, durationSec: rec.durationSec, waveform: rec.waveform })
+        }
       />
     </View>
   );

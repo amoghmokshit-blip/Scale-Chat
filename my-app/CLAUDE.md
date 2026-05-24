@@ -250,9 +250,10 @@ EAS commands (build, update, submit) — see [`../docs/architecture/expo-skills.
   - **Reply**: long-press a bubble → action sheet → Reply. Composer shows a dismissable reply banner; the sent message includes `replyToMessageId` and renders a quoted preview inside its bubble.
   - **Delete**: long-press own bubble → Delete for everyone. 60-min edit window enforced by the server. Tombstone renders as italic "This message was deleted" with a slash icon.
   - **Copy**: long-press a text bubble → Copy → clipboard via `expo-clipboard`.
-  - **Voice notes** render with play disc + waveform + duration (playback impl + recording UI ship in the next slice).
+  - **Attachments (Figma `1:3098`)**: paperclip → `AttachmentSheet` modal (Camera / Gallery / Document / Contact / Location). Camera + Gallery wired through `expo-image-picker`. Picked image → optimistic `uploading` bubble with local preview → presigned PUT to R2 → `kind: 'IMAGE'` send. `ImageBubble` lays out against intrinsic dims, tap → full-screen `ImageViewer` with pinch-zoom (`react-native-gesture-handler` + `reanimated`).
+  - **Voice notes (Figma `1:3698`)**: mic → `VoiceRecorderOverlay` (`expo-audio.useAudioRecorder`, HIGH_QUALITY m4a/AAC). Live timer + animated waveform + 5-min auto-stop. Send → presigned PUT to R2 → `kind: 'VOICE'` send. Receiver's bubble swaps the static `VoiceBlock` for `VoicePlayer` (`expo-audio.useAudioPlayer`) with progressive lime fill and current-time readout.
   - Composer: dark slab, paperclip + grey input pill + contextual scan/mic vs lime send button. Reply preview banner appears above the input when replying.
-  - Day divider pill, reverse pagination on scroll-up, optimistic send with `sending` → `delivered`/`failed` ticks.
+  - Day divider pill, reverse pagination on scroll-up, optimistic send with `uploading` → `sending` → `delivered`/`failed` ticks.
 - Mock OTP code: `1234`.
 
 **Backend (`../apps/api/`)** — production-grade NestJS:
@@ -274,4 +275,6 @@ EAS commands (build, update, submit) — see [`../docs/architecture/expo-skills.
 
 **Shared (`../packages/shared/`)** — zod schemas (auth + user), branded types (`Masked<T>`, `E164Phone`), phone helpers. Eventually the mobile app imports from here too (currently it has its own copies).
 
-**Not yet built** — Super Groups, image + voice attachments end-to-end (needs object storage), push notifications (needs Expo Push project + APNs/FCM creds), BullMQ workers for push fan-out, message reactions / forward / search, payments. All slot in behind existing interfaces.
+**Media upload pipeline** — `POST /media/upload-url` mints a 5-min presigned PUT URL to Cloudflare R2 (`@aws-sdk/client-s3` + `@aws-sdk/s3-request-presigner`). Object keys are `chat-media/{userIdFirst8}/{uuid}.{ext}`; the server validates that the prefix matches the sender on every `message:send` so a client can't paste another user's key. Public reads go through R2's CDN — no per-request signing. Media wire-format adds `mediaUrl`, `imageWidth`, `imageHeight` to `MessageDto`. Dev mode: if the R2_* env vars are unset, `/media/upload-url` returns 503 so local devs can still boot the API.
+
+**Not yet built** — Super Groups, push notifications (needs Expo Push project + APNs/FCM creds), BullMQ workers for push fan-out, message reactions / forward / search, R2 object cleanup on delete-for-everyone, payments. All slot in behind existing interfaces.

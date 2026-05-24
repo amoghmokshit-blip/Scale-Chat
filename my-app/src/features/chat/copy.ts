@@ -28,4 +28,20 @@ export const ChatCopy = {
     todayLabel: 'Today',
     yesterdayLabel: 'Yesterday',
   },
+
+  attachments: {
+    title: 'Share',
+    camera: 'Camera',
+    gallery: 'Gallery',
+    document: 'Document',
+    contact: 'Contact',
+    location: 'Location',
+  },
+
+  recorder: {
+    recording: 'Recording…',
+    holdToRecord: 'Tap send to share when ready',
+    tapSendToShare: 'Tap send to share',
+    permissionDenied: 'Microphone permission denied',
+  },
 } as const;

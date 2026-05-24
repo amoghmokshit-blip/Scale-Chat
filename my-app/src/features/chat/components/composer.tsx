@@ -77,7 +77,9 @@ export function Composer({
                   ? 'This message was deleted'
                   : replyingTo.type === 'text'
                     ? replyingTo.text
-                    : `Voice note · ${formatDuration(replyingTo.durationSec)}`}
+                    : replyingTo.type === 'voice'
+                      ? `Voice note · ${formatDuration(replyingTo.durationSec)}`
+                      : 'Photo'}
               </ThemedText>
             </View>
             <Pressable onPress={onCancelReply} hitSlop={10} style={styles.replyClose}>
