@@ -5,7 +5,7 @@ node_modules
 .env
 .env.local
 dist
-.tsbuildinfo
+*.tsbuildinfo
 coverage
 .idea/workspace.xml
 
