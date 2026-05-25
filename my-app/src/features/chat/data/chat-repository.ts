@@ -1,3 +1,12 @@
+import type {
+  BlockStatusResponse,
+  ClearChatResponse,
+  CommonGroupsListResponse,
+  MuteChatResponse,
+  ReportReason,
+  UserProfileCard,
+} from '@scalechat/shared';
+
 import type { Message, SendMessageInput, Thread } from '../types';
 
 export type LoadOlderResult = {
@@ -41,9 +50,54 @@ export interface ChatRepository {
   sendMessage(input: SendMessageInput): Promise<Message>;
   /** Delete-for-everyone — soft-deletes server-side, broadcasts a tombstone. */
   deleteMessage?(threadId: string, messageId: string): Promise<void>;
+  /**
+   * Report a counterpart's message for moderation. Server-side only; the
+   * report row never broadcasts. Per `(messageId, reporterUserId, reason)`
+   * uniqueness, repeated taps with the same reason fail with 409
+   * `already_reported`.
+   */
+  reportMessage?(input: {
+    messageId: string;
+    reason: ReportReason;
+    note?: string;
+  }): Promise<void>;
   markThreadRead(threadId: string): Promise<void>;
   markAllRead(): Promise<void>;
   toggleFavourite(threadId: string): Promise<void>;
+  /**
+   * Privacy-filtered public profile of another user. 403 if you don't share
+   * a chat with them and haven't saved them as a contact.
+   */
+  getProfileCard?(userId: string): Promise<UserProfileCard>;
+  /**
+   * Per-chat media gallery (Contact Profile → Media Links & Docs).
+   * `kind` narrows to IMAGE-only or VOICE-only; omit for both.
+   */
+  listMedia?(
+    threadId: string,
+    args?: { kind?: 'IMAGE' | 'VOICE'; cursor?: string; limit?: number },
+  ): Promise<{ items: Message[]; nextCursor: string | null; hasMore: boolean }>;
+  /**
+   * Group / Super Group chats both me and the target user are active members
+   * of. Returns `{ items: [] }` until groups ship.
+   */
+  getCommonGroups?(contactUserId: string): Promise<CommonGroupsListResponse>;
+  /**
+   * Mute notifications for a chat. `until: null` unmutes. The push worker
+   * (Phase E) reads `ChatMember.mutedUntil` and skips muted memberships.
+   */
+  muteChat?(threadId: string, until: Date | null): Promise<MuteChatResponse>;
+  /**
+   * Per-user "Clear chat" — hides messages with `createdAt ≤ now` from the
+   * caller's list view; the counterpart's history is untouched.
+   */
+  clearChat?(threadId: string): Promise<ClearChatResponse>;
+  /**
+   * Block a user. Server enforces symmetric blocking: sends in either
+   * direction are rejected with 403 `peer_blocked`.
+   */
+  blockUser?(userId: string): Promise<BlockStatusResponse>;
+  unblockUser?(userId: string): Promise<BlockStatusResponse>;
   /** Subscribe to repository changes (any thread/message update). */
   subscribe(listener: () => void): () => void;
 }

@@ -58,9 +58,11 @@ export function formatDayLabel(iso: string, now: Date = new Date()): string {
   return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
 }
 
-/** "0:39" — used for voice notes. */
+/** "0:39" — used for voice notes. Clamps negatives so a stray clock-skew or
+ *  null-coalesced default never renders as "-1:59" in a bubble. */
 export function formatDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = Math.max(0, Math.floor(seconds - m * 60));
+  const clamped = Math.max(0, seconds);
+  const m = Math.floor(clamped / 60);
+  const s = Math.floor(clamped - m * 60);
   return `${m}:${pad(s)}`;
 }

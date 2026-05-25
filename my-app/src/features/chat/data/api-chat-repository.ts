@@ -1,11 +1,19 @@
 import type {
+  BlockStatusResponse,
   ChatDetailDto,
   ChatListResponse,
+  ClearChatResponse,
+  CommonGroupsListResponse,
+  CreateMessageReportBody,
   MediaUploadKind,
   MediaUploadResponse,
   MessageDto,
   MessageListResponse,
+  MessageReportAck,
+  MuteChatBody,
+  MuteChatResponse,
   SendMessageBody,
+  UserProfileCard,
 } from '@scalechat/shared';
 import * as LegacyFileSystem from 'expo-file-system/legacy';
 
@@ -14,7 +22,11 @@ import { chatSocket } from '@/lib/chat-socket';
 
 import type { Contact, Message, MessageStatus, SendMessageInput, Thread } from '../types';
 import type { ChatRepository, LoadOlderResult } from './chat-repository';
+import { dtoToMessage } from './dto-to-message';
 import { mockChatRepository } from './mock-chat-repository';
+
+// Re-export so existing imports of `dtoToMessage` from this module continue to work.
+export { dtoToMessage };
 
 // ─── Listener bus ─────────────────────────────────────────────────────────────
 
@@ -39,6 +51,16 @@ type ThreadCache = {
 const cacheByChatId = new Map<string, ThreadCache>();
 const counterpartByChatId = new Map<string, string>();
 const highestSeqByChatId = new Map<string, bigint>();
+/**
+ * The counterpart's `lastReadSequence` as of the most recent `/chats/:id`
+ * fetch. Used by `listMessages` to mark mine-messages already read by the
+ * peer as `read` (lime double-tick) on initial load — closes Phase A cold-
+ * start read-receipt gap (known-limit #1 from the 2026-05-25 verify).
+ *
+ * Live updates flip rows via the existing `chatSocket.onReadReceipt`
+ * subscription; this cache is only consulted on the first paint of a thread.
+ */
+const counterpartLastReadByChatId = new Map<string, bigint>();
 
 function getCache(chatId: string): ThreadCache {
   let c = cacheByChatId.get(chatId);
@@ -102,39 +124,9 @@ function markPendingFailed(chatId: string, pendingId: string): void {
 }
 
 // ─── DTO ↔ domain conversion ──────────────────────────────────────────────────
-
-function dtoToMessage(m: MessageDto, counterpartId: string): Message {
-  const base = {
-    id: m.id,
-    threadId: m.chatId,
-    senderId: m.senderUserId === counterpartId ? counterpartId : 'me',
-    sequence: Number(m.sequence),
-    createdAt: m.createdAt,
-    status: 'delivered' as MessageStatus,
-    clientMessageId: m.clientMessageId,
-    replyToMessageId: m.replyToMessageId,
-    deletedAt: m.deletedAt,
-  };
-  if (m.kind === 'VOICE') {
-    return {
-      ...base,
-      type: 'voice',
-      durationSec: m.durationSec ?? 0,
-      waveform: m.waveform ?? [],
-      mediaUrl: m.mediaUrl ?? undefined,
-    };
-  }
-  if (m.kind === 'IMAGE') {
-    return {
-      ...base,
-      type: 'image',
-      mediaUrl: m.mediaUrl ?? '',
-      width: m.imageWidth ?? 0,
-      height: m.imageHeight ?? 0,
-    };
-  }
-  return { ...base, type: 'text', text: m.text ?? '' };
-}
+// Pure conversion lives in `./dto-to-message.ts` so the unit tests can import
+// it without dragging in MMKV / socket.io / expo-constants. The re-export at
+// the top of this file preserves existing call-sites.
 
 // ─── Media upload helpers ────────────────────────────────────────────────────
 
@@ -245,6 +237,11 @@ function detailToThread(detail: ChatDetailDto, last?: MessageDto): Thread {
 async function fetchDetail(chatId: string): Promise<ChatDetailDto> {
   const detail = await apiClient.get<ChatDetailDto>(`/chats/${chatId}`);
   if (detail.counterpart) counterpartByChatId.set(chatId, detail.counterpart.id);
+  if (detail.counterpartLastReadSequence) {
+    counterpartLastReadByChatId.set(chatId, BigInt(detail.counterpartLastReadSequence));
+  } else {
+    counterpartLastReadByChatId.delete(chatId);
+  }
   return detail;
 }
 
@@ -264,6 +261,30 @@ function ensureSocketWired(): void {
     upsertMessage(m.chatId, domain);
     rememberSequence(m.chatId, m.sequence);
     notify();
+  });
+
+  // When the peer's read cursor advances, the server broadcasts `chat:read`
+  // with `uptoSequence`. Flip every message I sent at-or-below that sequence
+  // from `delivered` → `read` so the bubble's lime double-tick lights up
+  // live. Self-reads (my own other devices) and reads from anyone other than
+  // the counterpart are ignored — only the peer reading my messages should
+  // change my bubble status.
+  chatSocket.onReadReceipt((r) => {
+    const counterpartId = counterpartByChatId.get(r.chatId);
+    if (!counterpartId || r.userId !== counterpartId) return;
+    const cache = cacheByChatId.get(r.chatId);
+    if (!cache) return;
+    const upto = BigInt(r.uptoSequence);
+    let changed = false;
+    for (let i = 0; i < cache.messages.length; i += 1) {
+      const m = cache.messages[i]!;
+      if (m.senderId !== 'me') continue;
+      if (m.status === 'read') continue;
+      if (BigInt(m.sequence) > upto) continue;
+      cache.messages[i] = { ...m, status: 'read' as MessageStatus };
+      changed = true;
+    }
+    if (changed) notify();
   });
 
   // When a peer (or our own other device) deletes a message, the server
@@ -376,6 +397,23 @@ export const apiChatRepository: ChatRepository = {
     // Seed cache: the response is already chronological asc (server contract).
     const cache = getCache(threadId);
     cache.messages = res.items.map((m) => dtoToMessage(m, counterpartId));
+
+    // Cold-start read receipts: flip mine-messages with `sequence ≤
+    // counterpartLastReadSequence` from `delivered` → `read` so the lime
+    // double-tick shows on initial load (Phase A known-limit #1 fix —
+    // 2026-05-25 verify follow-up).
+    const peerReadUpto = counterpartLastReadByChatId.get(threadId);
+    if (peerReadUpto !== undefined) {
+      for (let i = 0; i < cache.messages.length; i++) {
+        const msg = cache.messages[i]!;
+        if (msg.senderId === 'me' && msg.status !== 'read') {
+          if (BigInt(msg.sequence) <= peerReadUpto) {
+            cache.messages[i] = { ...msg, status: 'read' as MessageStatus };
+          }
+        }
+      }
+    }
+
     cache.oldestCursor = res.meta.nextCursor;
     cache.hasMoreOlder = res.meta.hasMore;
     res.items.forEach((m) => rememberSequence(threadId, m.sequence));
@@ -575,6 +613,63 @@ export const apiChatRepository: ChatRepository = {
       }
       throw err;
     }
+  },
+
+  async reportMessage({ messageId, reason, note }) {
+    const body: CreateMessageReportBody = note ? { reason, note } : { reason };
+    await apiClient.post<MessageReportAck>(`/messages/${messageId}/report`, body);
+  },
+
+  async getProfileCard(userId) {
+    return apiClient.get<UserProfileCard>(`/users/${userId}/profile-card`);
+  },
+
+  async listMedia(threadId, args) {
+    const params = new URLSearchParams();
+    if (args?.kind) params.set('kind', args.kind);
+    if (args?.cursor) params.set('cursor', args.cursor);
+    if (args?.limit) params.set('limit', String(args.limit));
+    const qs = params.toString();
+    const res = await apiClient.get<MessageListResponse>(
+      `/chats/${threadId}/media${qs ? `?${qs}` : ''}`,
+    );
+    const counterpartId = counterpartByChatId.get(threadId) ?? '';
+    return {
+      items: res.items.map((m) => dtoToMessage(m, counterpartId)),
+      nextCursor: res.meta.nextCursor,
+      hasMore: res.meta.hasMore,
+    };
+  },
+
+  async getCommonGroups(contactUserId) {
+    return apiClient.get<CommonGroupsListResponse>(
+      `/contacts/${contactUserId}/common-groups`,
+    );
+  },
+
+  async muteChat(threadId, until) {
+    const body: MuteChatBody = { until: until ? until.toISOString() : null };
+    return apiClient.patch<MuteChatResponse>(`/chats/${threadId}/mute`, body);
+  },
+
+  async clearChat(threadId) {
+    // Fastify's body-parser rejects PATCH with `content-type: application/json`
+    // and an empty body — RN's `fetch` adds the header by default. Pass an
+    // explicit `{}` so the request body matches the declared content-type.
+    const res = await apiClient.patch<ClearChatResponse>(`/chats/${threadId}/clear`, {});
+    // Drop our cached messages so the UI re-fetches against the new clearedAt.
+    cacheByChatId.delete(threadId);
+    highestSeqByChatId.delete(threadId);
+    notify();
+    return res;
+  },
+
+  async blockUser(userId) {
+    return apiClient.post<BlockStatusResponse>(`/users/${userId}/block`, {});
+  },
+
+  async unblockUser(userId) {
+    return apiClient.del<BlockStatusResponse>(`/users/${userId}/block`);
   },
 
   async markThreadRead(threadId) {

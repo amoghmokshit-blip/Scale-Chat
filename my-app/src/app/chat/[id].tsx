@@ -1,5 +1,5 @@
 import * as ImagePicker from 'expo-image-picker';
-import { useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   Alert,
@@ -17,6 +17,7 @@ import { ThemedText } from '@/components/themed-text';
 import { Brand } from '@/constants/theme';
 import { AttachmentSheet } from '@/features/chat/components/attachment-sheet';
 import { ChatHeader } from '@/features/chat/components/chat-header';
+import { ComingSoonSheet } from '@/features/chat/components/coming-soon-sheet';
 import { Composer } from '@/features/chat/components/composer';
 import { DayDivider } from '@/features/chat/components/day-divider';
 import {
@@ -24,7 +25,11 @@ import {
   copyMessageText,
 } from '@/features/chat/components/message-action-sheet';
 import { MessageBubble } from '@/features/chat/components/message-bubble';
+import { MessageReportSheet } from '@/features/chat/components/message-report-sheet';
+import { MutePickerSheet } from '@/features/chat/components/mute-picker-sheet';
+import { PerChatOptionsSheet } from '@/features/chat/components/per-chat-options-sheet';
 import { VoiceRecorderOverlay } from '@/features/chat/components/voice-recorder-overlay';
+import { ChatCopy } from '@/features/chat/copy';
 import { useThread } from '@/features/chat/hooks/use-thread';
 import { chatRepository } from '@/features/chat/data';
 import { formatDayLabel } from '@/lib/format-time';
@@ -55,6 +60,7 @@ type ListItem =
  * dispatches user intents back through the `useThread` hook.
  */
 export default function ChatThreadScreen() {
+  const router = useRouter();
   const { id } = useLocalSearchParams<{ id?: string }>();
   const insets = useSafeAreaInsets();
   const {
@@ -70,6 +76,7 @@ export default function ChatThreadScreen() {
     replyTo,
     replyingTo,
     deleteMessage,
+    reportMessage,
     notifyTyping,
     peerTyping,
     peerPresence,
@@ -77,8 +84,19 @@ export default function ChatThreadScreen() {
   const listRef = useRef<FlatList<ListItem>>(null);
 
   const [sheetMessage, setSheetMessage] = useState<Message | null>(null);
+  const [reportTarget, setReportTarget] = useState<Message | null>(null);
   const [attachOpen, setAttachOpen] = useState(false);
   const [recorderOpen, setRecorderOpen] = useState(false);
+  const [comingSoonKey, setComingSoonKey] = useState<
+    'voiceCall' | 'videoCall' | 'chatTheme' | 'exportChat' | 'search' | 'starred' | null
+  >(null);
+  // Phase C state. Initial mute / block state isn't yet plumbed through
+  // `ChatDetailDto`; the screen defaults to false and flips on user action.
+  // Plumbing the initial state lands when Phase E (push) needs to read it.
+  const [optionsOpen, setOptionsOpen] = useState(false);
+  const [mutePickerOpen, setMutePickerOpen] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isBlocked, setIsBlocked] = useState(false);
 
   // Index id → message so each reply bubble can look up its source O(1).
   const byId = useMemo(() => {
@@ -108,6 +126,54 @@ export default function ChatThreadScreen() {
       />
     );
   };
+
+  // ─── Phase C action handlers ──────────────────────────────────────────────
+  async function handleMute(until: Date | null) {
+    if (!id) return;
+    const fn = chatRepository.muteChat;
+    if (!fn) return;
+    try {
+      const res = await fn.call(chatRepository, id, until);
+      setIsMuted(res.mutedUntil !== null);
+    } catch {
+      Alert.alert('Could not update notifications', 'Please try again.');
+    }
+  }
+
+  async function handleClearChat() {
+    if (!id) return;
+    const fn = chatRepository.clearChat;
+    if (!fn) return;
+    try {
+      await fn.call(chatRepository, id);
+    } catch {
+      Alert.alert('Could not clear chat', 'Please try again.');
+    }
+  }
+
+  async function handleBlock() {
+    if (!thread) return;
+    const fn = chatRepository.blockUser;
+    if (!fn) return;
+    try {
+      await fn.call(chatRepository, thread.counterpart.id);
+      setIsBlocked(true);
+    } catch {
+      Alert.alert('Could not block', 'Please try again.');
+    }
+  }
+
+  async function handleUnblock() {
+    if (!thread) return;
+    const fn = chatRepository.unblockUser;
+    if (!fn) return;
+    try {
+      await fn.call(chatRepository, thread.counterpart.id);
+      setIsBlocked(false);
+    } catch {
+      Alert.alert('Could not unblock', 'Please try again.');
+    }
+  }
 
   async function handleDelete() {
     if (!sheetMessage) return;
@@ -182,6 +248,13 @@ export default function ChatThreadScreen() {
         isOnline={peerPresence.isOnline}
         lastSeenAt={peerPresence.lastSeenAt}
         isPeerTyping={peerTyping}
+        isMuted={isMuted}
+        onVoiceCall={() => setComingSoonKey('voiceCall')}
+        onVideoCall={() => setComingSoonKey('videoCall')}
+        onOpenProfile={() =>
+          router.push({ pathname: '/contact/[id]', params: { id: thread.counterpart.id } })
+        }
+        onOpenOverflow={() => setOptionsOpen(true)}
       />
       <KeyboardAvoidingView
         style={styles.body}
@@ -225,6 +298,21 @@ export default function ChatThreadScreen() {
           if (sheetMessage) void copyMessageText(sheetMessage);
         }}
         onDelete={handleDelete}
+        onReport={() => {
+          // Open the reason picker after the action sheet closes itself.
+          const m = sheetMessage;
+          if (m) setReportTarget(m);
+        }}
+      />
+
+      <MessageReportSheet
+        visible={reportTarget !== null}
+        counterpartName={thread.counterpart.displayName}
+        onClose={() => setReportTarget(null)}
+        onSubmit={async (reason) => {
+          if (!reportTarget) return;
+          await reportMessage(reportTarget.id, reason);
+        }}
       />
 
       <AttachmentSheet
@@ -241,9 +329,122 @@ export default function ChatThreadScreen() {
           sendVoice({ uri: rec.uri, durationSec: rec.durationSec, waveform: rec.waveform })
         }
       />
+
+      <ComingSoonSheet
+        visible={
+          comingSoonKey === 'voiceCall' ||
+          comingSoonKey === 'videoCall'
+        }
+        icon={comingSoonKey === 'videoCall' ? 'video' : 'phone'}
+        title={
+          comingSoonKey === 'voiceCall'
+            ? ChatCopy.comingSoon.voiceCall.title
+            : ChatCopy.comingSoon.videoCall.title
+        }
+        body={
+          comingSoonKey === 'voiceCall'
+            ? ChatCopy.comingSoon.voiceCall.body
+            : ChatCopy.comingSoon.videoCall.body
+        }
+        footnote={
+          comingSoonKey === 'voiceCall'
+            ? ChatCopy.comingSoon.voiceCall.footnote
+            : comingSoonKey === 'videoCall'
+              ? ChatCopy.comingSoon.videoCall.footnote
+              : undefined
+        }
+        onClose={() => setComingSoonKey(null)}
+      />
+
+      {/* Phase C — per-chat options + supporting modals */}
+      <PerChatOptionsSheet
+        visible={optionsOpen}
+        counterpartName={thread.counterpart.displayName}
+        isMuted={isMuted}
+        isBlocked={isBlocked}
+        onClose={() => setOptionsOpen(false)}
+        onViewContact={() =>
+          router.push({ pathname: '/contact/[id]', params: { id: thread.counterpart.id } })
+        }
+        onSearch={() => setComingSoonKey('search')}
+        onMute={() => setMutePickerOpen(true)}
+        onUnmute={() => void handleMute(null)}
+        onStarred={() => setComingSoonKey('starred')}
+        onWallpaper={() => setComingSoonKey('chatTheme')}
+        onClearChat={() =>
+          Alert.alert(
+            'Clear this chat?',
+            'Messages will be hidden from your view. The other person will still see them.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Clear chat',
+                style: 'destructive',
+                onPress: () => void handleClearChat(),
+              },
+            ],
+          )
+        }
+        onExportChat={() => setComingSoonKey('exportChat')}
+        onBlock={() =>
+          Alert.alert(
+            `Block ${thread.counterpart.displayName}?`,
+            'They will no longer be able to message you in this chat, and you can\'t message them. Existing messages stay.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Block',
+                style: 'destructive',
+                onPress: () => void handleBlock(),
+              },
+            ],
+          )
+        }
+        onUnblock={() => void handleUnblock()}
+      />
+
+      <MutePickerSheet
+        visible={mutePickerOpen}
+        counterpartName={thread.counterpart.displayName}
+        onClose={() => setMutePickerOpen(false)}
+        onPick={(until) => void handleMute(until)}
+      />
+
+      <ComingSoonSheet
+        visible={comingSoonKey === 'chatTheme'}
+        icon="droplet"
+        title={ChatCopy.comingSoon.chatTheme.title}
+        body={ChatCopy.comingSoon.chatTheme.body}
+        onClose={() => setComingSoonKey(null)}
+      />
+
+      <ComingSoonSheet
+        visible={comingSoonKey === 'exportChat'}
+        icon="share"
+        title={ChatCopy.comingSoon.exportChat.title}
+        body={ChatCopy.comingSoon.exportChat.body}
+        onClose={() => setComingSoonKey(null)}
+      />
+
+      <ComingSoonSheet
+        visible={comingSoonKey === 'search'}
+        icon="search"
+        title="Search in chat coming soon"
+        body="In-thread search lands with Phase D — you'll be able to jump to any message by keyword."
+        onClose={() => setComingSoonKey(null)}
+      />
+
+      <ComingSoonSheet
+        visible={comingSoonKey === 'starred'}
+        icon="star"
+        title="Starred messages coming soon"
+        body="You'll soon be able to star any message and find it again here."
+        onClose={() => setComingSoonKey(null)}
+      />
     </View>
   );
 }
+
 
 function groupForRender(messages: Message[], byId: Map<string, Message>): ListItem[] {
   const out: ListItem[] = [];

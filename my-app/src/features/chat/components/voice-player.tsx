@@ -1,7 +1,7 @@
 import { Feather } from '@expo/vector-icons';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { useEffect } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { Brand, FontWeight } from '@/constants/theme';
@@ -44,6 +44,10 @@ export function VoicePlayer({ message, isMine }: Props) {
   const current = Math.min(total, Math.max(0, status.currentTime ?? 0));
   const progress = total > 0 ? current / total : 0;
   const playing = status.playing && !!message.mediaUrl;
+  // `isLoaded` is false while the m4a is still streaming from R2 on first
+  // open. Slow Indian connections can make that gap visible — show a spinner
+  // in the play button so the bubble doesn't look unresponsive.
+  const isLoading = !!message.mediaUrl && status.isLoaded === false;
 
   function toggle() {
     if (!message.mediaUrl) return;
@@ -66,12 +70,16 @@ export function VoicePlayer({ message, isMine }: Props) {
         accessibilityRole="button"
         accessibilityLabel={playing ? 'Pause voice note' : 'Play voice note'}
         style={[styles.playBtn, { borderColor: tint }, !message.mediaUrl && { opacity: 0.5 }]}>
-        <Feather
-          name={playing ? 'pause' : 'play'}
-          size={14}
-          color={tint}
-          style={!playing ? { marginLeft: 2 } : undefined}
-        />
+        {isLoading ? (
+          <ActivityIndicator size="small" color={tint} />
+        ) : (
+          <Feather
+            name={playing ? 'pause' : 'play'}
+            size={14}
+            color={tint}
+            style={!playing ? { marginLeft: 2 } : undefined}
+          />
+        )}
       </Pressable>
       <View style={styles.waveform}>
         {message.waveform.map((peak, i) => {

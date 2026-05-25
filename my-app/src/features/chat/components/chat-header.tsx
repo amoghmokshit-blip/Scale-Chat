@@ -24,9 +24,13 @@ type Props = {
   lastSeenAt?: string | null;
   /** True while the peer is actively typing. Overrides the presence subline. */
   isPeerTyping?: boolean;
+  /** True when the user has muted this chat — adds a bell-off pip on the avatar. */
+  isMuted?: boolean;
   onOpenProfile?: () => void;
   onVoiceCall?: () => void;
   onVideoCall?: () => void;
+  /** Opens the per-chat options sheet (BRD §3.6). */
+  onOpenOverflow?: () => void;
 };
 
 /**
@@ -46,9 +50,11 @@ export function ChatHeader({
   isOnline,
   lastSeenAt,
   isPeerTyping,
+  isMuted,
   onOpenProfile,
   onVoiceCall,
   onVideoCall,
+  onOpenOverflow,
 }: Props) {
   const router = useRouter();
   const handleBack = () => {
@@ -81,7 +87,14 @@ export function ChatHeader({
           </Pressable>
 
           <Pressable onPress={onOpenProfile} style={styles.identity} hitSlop={6}>
-            <Avatar contact={counterpart} size={52} />
+            <View>
+              <Avatar contact={counterpart} size={52} />
+              {isMuted ? (
+                <View style={styles.mutedBadge}>
+                  <Feather name="bell-off" size={10} color="#1B1B1B" />
+                </View>
+              ) : null}
+            </View>
             <View style={styles.identityText}>
               <ThemedText style={styles.name} numberOfLines={1}>
                 {counterpart.displayName}
@@ -117,6 +130,19 @@ export function ChatHeader({
               accessibilityLabel="Voice call">
               <Feather name="phone" size={14} color={Brand.chatActionLimeText} />
             </Pressable>
+            {onOpenOverflow ? (
+              <Pressable
+                onPress={onOpenOverflow}
+                style={({ pressed }: { pressed: boolean }) => [
+                  styles.overflowBtn,
+                  pressed && styles.pressed,
+                ]}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="More options">
+                <Feather name="more-vertical" size={18} color="#EDEDED" />
+              </Pressable>
+            ) : null}
           </View>
         </View>
       </SafeAreaView>
@@ -155,7 +181,10 @@ function PresenceLine({
       </ThemedText>
     );
   }
-  return null;
+  // F4 (2026-05-25 verify): reserve the subline height so the header doesn't
+  // shift when the first presence event lands. Single-line placeholder, same
+  // height as the populated states above.
+  return <View style={styles.presencePlaceholder} />;
 }
 
 /** Three pulsing dots — the WhatsApp / iMessage typing indicator. */
@@ -255,6 +284,13 @@ const styles = StyleSheet.create({
     fontWeight: FontWeight.regular,
     marginTop: 1,
   },
+  presencePlaceholder: {
+    // Matches the fontSize:11 line-height + marginTop:1 of the populated
+    // PresenceLine states so the header preserves the same vertical footprint
+    // even before a presence event has landed.
+    height: 14,
+    marginTop: 1,
+  },
   typingRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -283,5 +319,25 @@ const styles = StyleSheet.create({
     backgroundColor: Brand.chatActionLime,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  overflowBtn: {
+    width: 28,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: -2,
+  },
+  mutedBadge: {
+    position: 'absolute',
+    right: -2,
+    bottom: -2,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: Brand.chatActionLime,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
   },
 });

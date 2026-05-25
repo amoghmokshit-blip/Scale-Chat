@@ -23,6 +23,8 @@ type Props = {
   onReply: () => void;
   onCopy: () => void;
   onDelete: () => void;
+  /** When provided, a "Report" row is shown on counterpart bubbles (non-tombstones). */
+  onReport?: () => void;
 };
 
 /**
@@ -45,6 +47,7 @@ export function MessageActionSheet({
   onReply,
   onCopy,
   onDelete,
+  onReport,
 }: Props) {
   if (!message) return null;
 
@@ -65,6 +68,15 @@ export function MessageActionSheet({
       icon: 'trash-2',
       destructive: true,
       onPress: onDelete,
+    });
+  }
+  if (!isMine && !isTombstone && onReport) {
+    actions.push({
+      key: 'report',
+      label: 'Report',
+      icon: 'flag',
+      destructive: true,
+      onPress: onReport,
     });
   }
   if (actions.length === 0) {

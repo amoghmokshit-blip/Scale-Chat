@@ -44,4 +44,26 @@ export const ChatCopy = {
     tapSendToShare: 'Tap send to share',
     permissionDenied: 'Microphone permission denied',
   },
+
+  /** Coming-Soon sheet copy for affordances visible in Figma but shipping later. */
+  comingSoon: {
+    voiceCall: {
+      title: 'Voice calls launching soon',
+      body: 'Free voice calls are on the way. We’re putting the finishing touches on call quality across Indian networks.',
+      footnote: 'Calls will be free for everyone — not behind any premium plan.',
+    },
+    videoCall: {
+      title: 'Video calls launching soon',
+      body: 'Face-to-face on ScaleChat is almost ready. We’re tuning it for slower connections first.',
+      footnote: 'Calls will be free for everyone — not behind any premium plan.',
+    },
+    chatTheme: {
+      title: 'Chat themes coming soon',
+      body: 'Pick a custom wallpaper or theme for each conversation. Landing in the next polish ticket.',
+    },
+    exportChat: {
+      title: 'Export chat coming soon',
+      body: 'You’ll soon be able to email or save a chat transcript with or without media.',
+    },
+  },
 } as const;

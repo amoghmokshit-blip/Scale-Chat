@@ -1,3 +1,4 @@
+import type { ReportReason } from '@scalechat/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { chatSocket } from '@/lib/chat-socket';
@@ -58,6 +59,7 @@ export function useThread(threadId: string | undefined): {
   replyTo: (message: Message | null) => void;
   replyingTo: Message | null;
   deleteMessage: (messageId: string) => Promise<void>;
+  reportMessage: (messageId: string, reason: ReportReason, note?: string) => Promise<void>;
   /** Call on every keystroke; we debounce + rate-limit internally. */
   notifyTyping: () => void;
   peerTyping: boolean;
@@ -257,6 +259,16 @@ export function useThread(threadId: string | undefined): {
     setReplyingTo(message);
   }, []);
 
+  // ─── Report ────────────────────────────────────────────────────────────────
+  const reportMessage = useCallback(
+    async (messageId: string, reason: ReportReason, note?: string) => {
+      const fn = chatRepository.reportMessage;
+      if (!fn) return;
+      await fn.call(chatRepository, { messageId, reason, note });
+    },
+    []
+  );
+
   // ─── Typing emitter (rate-limited) ─────────────────────────────────────────
   const notifyTyping = useCallback(() => {
     if (!threadId) return;
@@ -281,6 +293,7 @@ export function useThread(threadId: string | undefined): {
     replyTo,
     replyingTo,
     deleteMessage,
+    reportMessage,
     notifyTyping,
     peerTyping,
     peerPresence,

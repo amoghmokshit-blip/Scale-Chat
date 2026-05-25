@@ -150,6 +150,75 @@ export const mockChatRepository: ChatRepository = {
     persist();
   },
 
+  async reportMessage() {
+    // Mock store has no moderation queue — pretend the report was filed.
+    // The api repo is the only thing that actually POSTs to /messages/:id/report.
+    await sleep();
+  },
+
+  async getProfileCard(userId) {
+    await sleep();
+    // Look up the contact in the chat threads (counterpart shape) and synthesise
+    // a profile card. The mock never gates by privacy — useful for offline UI dev.
+    const s = getState();
+    const thread = s.threads.find((t) => t.counterpart.id === userId);
+    const fromContacts = SEED_CONTACT_BY_ID[userId];
+    const contact = thread?.counterpart ?? fromContacts ?? null;
+    if (!contact) throw new Error(`mock: no contact ${userId}`);
+    return {
+      id: userId,
+      fullName: contact.displayName,
+      phoneE164: contact.phoneE164 ?? '+91 00000 00000',
+      avatarUri: contact.avatarUri ?? null,
+      bio: null,
+      isPremium: false,
+      createdAt: new Date(Date.now() - 30 * 86_400_000).toISOString(),
+      commonChatId: thread?.id ?? null,
+      isBlocked: false,
+    };
+  },
+
+  async listMedia(threadId, args) {
+    await sleep();
+    const s = getState();
+    const all = s.messagesByThread[threadId] ?? [];
+    const filtered = all.filter((m) => {
+      if (m.deletedAt) return false;
+      if (args?.kind === 'IMAGE') return m.type === 'image';
+      if (args?.kind === 'VOICE') return m.type === 'voice';
+      return m.type === 'image' || m.type === 'voice';
+    });
+    return { items: clone(filtered), nextCursor: null, hasMore: false };
+  },
+
+  async getCommonGroups() {
+    await sleep();
+    return { items: [] };
+  },
+
+  async muteChat(threadId, until) {
+    await sleep();
+    return { chatId: threadId, mutedUntil: until ? until.toISOString() : null };
+  },
+
+  async clearChat(threadId) {
+    await sleep();
+    const s = getState();
+    s.messagesByThread = { ...s.messagesByThread, [threadId]: [] };
+    persist();
+    return { chatId: threadId, clearedAt: new Date().toISOString() };
+  },
+
+  async blockUser(userId) {
+    await sleep();
+    return { blockedUserId: userId, isBlocked: true };
+  },
+
+  async unblockUser(userId) {
+    await sleep();
+    return { blockedUserId: userId, isBlocked: false };
+  },
+
   async markThreadRead(threadId) {
     await sleep();
     const s = getState();

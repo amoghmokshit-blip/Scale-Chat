@@ -16,6 +16,7 @@ export default function RootLayout() {
         <Stack.Screen name="(setup)" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="chat" options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen name="contact" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="(modals)" options={{ presentation: 'modal' }} />
         <Stack.Screen name="stories" options={{ presentation: 'modal', animation: 'fade' }} />
       </Stack>
