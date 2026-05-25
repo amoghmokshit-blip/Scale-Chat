@@ -15,10 +15,13 @@ import {
 } from '@nestjs/common';
 import {
   AddContactSchema,
+  BulkAddContactsSchema,
   ContactsListQuerySchema,
   DiscoverContactsSchema,
   UpdateContactSchema,
   type AddContactBody,
+  type BulkAddContactsBody,
+  type BulkAddContactsResponse,
   type CommonGroupsListResponse,
   type Contact,
   type ContactsListQuery,
@@ -37,6 +40,8 @@ import { ContactsService } from './contacts.service';
 
 const DISCOVER_LIMIT_PER_MIN = 10;
 const DISCOVER_WINDOW_MS = 60_000;
+const BULK_LIMIT_PER_MIN = 5;
+const BULK_WINDOW_MS = 60_000;
 
 @UseGuards(JwtAuthGuard)
 @Controller('contacts')
@@ -98,6 +103,40 @@ export class ContactsController {
       );
     }
     return this.contacts.discover(user.sub, body.phones);
+  }
+
+  /**
+   * `POST /contacts/bulk` — write path. The Save step after Import Contacts.
+   * Body is a batch of {phoneE164, displayName} entries (≤500); the service
+   * silently partitions into newly-saved vs already-had and never throws on
+   * the duplicate case. Caller's own phone is filtered out.
+   *
+   * Lower rate ceiling than `discover` (5 vs 10 / min) — saves are intentional,
+   * not a hot path. The ceiling also bounds runaway storage growth from a
+   * compromised client.
+   */
+  @Post('bulk')
+  @HttpCode(200)
+  async addMany(
+    @CurrentUser() user: AccessTokenPayload,
+    @Body(new ZodValidationPipe(BulkAddContactsSchema)) body: BulkAddContactsBody,
+  ): Promise<BulkAddContactsResponse> {
+    const result = await this.rateLimit.consume(
+      `contacts:bulk:${user.sub}`,
+      BULK_LIMIT_PER_MIN,
+      BULK_WINDOW_MS,
+    );
+    if (!result.allowed) {
+      throw new HttpException(
+        {
+          code: 'rate_limited',
+          message: 'Too many bulk-save requests. Try again shortly.',
+          resetInMs: result.resetInMs,
+        },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+    return this.contacts.addMany(user.sub, body);
   }
 
   @Patch(':id')

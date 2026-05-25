@@ -1,6 +1,8 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import type {
   AddContactBody,
+  BulkAddContactsBody,
+  BulkAddContactsResponse,
   CommonGroupsListResponse,
   Contact,
   ContactDiscoveryMatch,
@@ -251,5 +253,102 @@ export class ContactsService {
       ? matches.filter((m) => m.phoneE164 !== self.phoneE164)
       : matches;
     return { matches: filtered };
+  }
+
+  /**
+   * Idempotent bulk save — the write companion to `discover()`. Users land here
+   * after they've ticked a subset of discovered matches and tapped Save.
+   *
+   * Unlike `add()`, which throws ConflictException on a duplicate, the bulk
+   * path silently partitions input into `toCreate` + `alreadyHad`. The user
+   * intent here is "make sure these are saved", not "fail if one exists" —
+   * import UX shouldn't bail mid-batch because one number was already there.
+   *
+   * Self-add and dedup guards mirror `add()` but apply over the whole batch
+   * in a single round-trip:
+   *
+   *   1. Read caller's phone once; drop any item with the same number.
+   *   2. Read existing `(ownerUserId, phoneE164)` rows in one query;
+   *      partition the input into `toCreate` (new) vs `alreadyHad` (skip).
+   *   3. Resolve `contactUserId` for the `toCreate` phones in one query
+   *      against `users.phoneE164` (indexed @unique).
+   *   4. `createMany` the new rows (no `skipDuplicates` — application-level
+   *      dedup is what the repo uses everywhere else; the (ownerUserId,
+   *      phoneE164) unique index is the safety net).
+   *   5. Re-`findMany` the freshly created rows by `(ownerUserId, phoneE164IN)`
+   *      with the `contactUser.avatarUri` include so the DTO shape matches
+   *      single-`add()` returns. PG `createMany` doesn't return rows.
+   *
+   * Tradeoff: a brief window between createMany and the re-read could see
+   * concurrent writes from another transaction. In practice the rate limit
+   * (5/min/user) + the (ownerUserId, phoneE164) unique constraint mean that
+   * concurrent bulk saves from the same user can't double-insert; the
+   * re-read just sees whichever batch landed first. Acceptable.
+   */
+  async addMany(
+    ownerUserId: string,
+    body: BulkAddContactsBody,
+  ): Promise<BulkAddContactsResponse> {
+    // Per-batch dedup of the client input itself — a user might tick the same
+    // number twice across two device-contact entries. Keep first occurrence.
+    const uniqueByPhone = new Map<string, AddContactBody>();
+    for (const item of body.items) {
+      if (!uniqueByPhone.has(item.phoneE164)) uniqueByPhone.set(item.phoneE164, item);
+    }
+
+    // 1. Self-add guard — drop any item with the caller's own phone.
+    const self = await this.prisma.user.findUnique({
+      where: { id: ownerUserId },
+      select: { phoneE164: true },
+    });
+    if (self) uniqueByPhone.delete(self.phoneE164);
+
+    const candidates = Array.from(uniqueByPhone.values());
+    if (candidates.length === 0) {
+      return { saved: [], alreadyHad: 0 };
+    }
+    const candidatePhones = candidates.map((c) => c.phoneE164);
+
+    // 2. Partition against the (ownerUserId, phoneE164) unique constraint.
+    const existing = await this.prisma.contact.findMany({
+      where: { ownerUserId, phoneE164: { in: candidatePhones } },
+      select: { phoneE164: true },
+    });
+    const existingPhones = new Set(existing.map((e) => e.phoneE164));
+    const toCreate = candidates.filter((c) => !existingPhones.has(c.phoneE164));
+    const alreadyHad = candidates.length - toCreate.length;
+
+    if (toCreate.length === 0) {
+      return { saved: [], alreadyHad };
+    }
+
+    // 3. Resolve contactUserId for any platform users matching the new phones.
+    const platformUsers = await this.prisma.user.findMany({
+      where: { phoneE164: { in: toCreate.map((c) => c.phoneE164) } },
+      select: { id: true, phoneE164: true },
+    });
+    const userIdByPhone = new Map(platformUsers.map((u) => [u.phoneE164, u.id]));
+
+    // 4. Insert + 5. re-read in one transaction so we observe the inserts
+    //    consistently and can return the new rows as full DTOs.
+    const savedRows = await this.prisma.$transaction(async (tx) => {
+      await tx.contact.createMany({
+        data: toCreate.map((c) => ({
+          ownerUserId,
+          contactUserId: userIdByPhone.get(c.phoneE164) ?? null,
+          phoneE164: c.phoneE164,
+          displayName: c.displayName,
+        })),
+      });
+      return tx.contact.findMany({
+        where: {
+          ownerUserId,
+          phoneE164: { in: toCreate.map((c) => c.phoneE164) },
+        },
+        include: { contactUser: { select: { avatarUri: true } } },
+      });
+    });
+
+    return { saved: savedRows.map(toDto), alreadyHad };
   }
 }

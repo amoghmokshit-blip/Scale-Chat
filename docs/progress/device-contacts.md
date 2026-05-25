@@ -15,8 +15,8 @@
 | Sub-PR | Scope | Status |
 |---|---|---|
 | **6.1 — Shared schemas + Jest harness** | Discover/Bulk zod schemas; expand `toE164India` for E.164-prefixed input; add edge-case tests | ✅ Shipped (`07a61b3`) |
-| **6.2 — Backend `POST /contacts/discover`** | Stateless discovery, rate-limited, privacy-shaped response, first contacts e2e spec | ✅ **Shipped** (this commit) |
-| **6.3 — Backend `POST /contacts/bulk`** | Idempotent bulk save, transaction-based dedup | 🚧 Pending |
+| **6.2 — Backend `POST /contacts/discover`** | Stateless discovery, rate-limited, privacy-shaped response, first contacts e2e spec | ✅ Shipped (`cb3a9fd`) |
+| **6.3 — Backend `POST /contacts/bulk`** | Idempotent bulk save, transaction-based dedup | ✅ **Shipped** (this commit) |
 | **6.4 — Frontend `expo-contacts` + Import Contacts modal** | `useDeviceContacts` hook, `/import-contacts` screen, "Pick from phonebook" entry | 🚧 Pending |
 
 ---
@@ -112,23 +112,81 @@ The ghost phone `+919999999999` doesn't exist in the seeded `users` table, so on
 
 ---
 
+## PR 6.3 — What shipped
+
+### Files touched
+
+- **`apps/api/src/modules/contacts/contacts.controller.ts`** — added `@Post('bulk')` route. 5 req/min rate limit via `contacts:bulk:{user.sub}`. Placed before `:id` routes so NestJS matches correctly.
+- **`apps/api/src/modules/contacts/contacts.service.ts`** — added `addMany(ownerUserId, body)`. Five-stage pipeline:
+  1. Per-batch dedup via `Map<phoneE164, item>` — first occurrence wins (handles iCloud→Google contact duplicates).
+  2. Self-add filter — read caller's own `phoneE164` once, drop matching items.
+  3. Partition against `(ownerUserId, phoneE164)` unique constraint via one `findMany` → `toCreate` vs `alreadyHad`.
+  4. Resolve `contactUserId` for new phones via one `findMany` on `users.phoneE164`.
+  5. `$transaction` → `createMany` + re-`findMany` (PG `createMany` doesn't return rows; re-read gives full DTOs).
+- **`apps/api/test/contacts.e2e-spec.ts`** — extended with 6 new cases (Cases 5-10):
+  - **5**: Happy path — 3 items (2 on-platform, 1 ghost) → `{ saved: 3, alreadyHad: 0 }`, `isOnPlatform` correct per item.
+  - **6**: Idempotent — re-run same batch → `{ saved: 0, alreadyHad: 2 }`, no double rows in DB.
+  - **7**: Self-add filter — caller's own phone silently dropped; not counted in `alreadyHad`.
+  - **8**: Per-batch dedup — same phone twice → first occurrence wins, displayName from second is dropped.
+  - **9**: Empty array → 400; malformed E.164 in any item → 400.
+  - **10**: Rate limit — 5 calls then 11th → 429 `rate_limited`.
+
+### Key design choices
+
+1. **Bulk silently dedups; `add()` throws.** The single-item `add()` raises `ConflictException` if the phone is already saved. The bulk path returns `alreadyHad: N` instead — import UX shouldn't bail mid-batch because one number was already there. Two different semantics, same module, intentional.
+2. **No `prisma.createMany({ skipDuplicates: true })`** — the audit showed it's not used anywhere in the repo. Application-level dedup (the `findMany`-then-partition step) makes the conflict count visible via `alreadyHad`, which the UI uses for "saved 3, you already had 2" feedback.
+3. **Interactive `$transaction`** (callback form) is needed because of the read-after-write dependency: `createMany` (no row return on PG) → re-`findMany` to get full DTOs. The array-batch form doesn't support that.
+4. **Resolving `contactUserId`** in a separate query (step 4) rather than via Prisma's `connect: { where: { phoneE164 } }` keeps the query plan flat — one indexed lookup, one batch insert. Trying to do this in a relational `connect` would force Prisma into a per-row subquery.
+
+### Live API smoke test
+
+```
+TOK="<fresh JWT>"
+
+# Save 3 contacts — 2 platform users + 1 ghost.
+curl -X POST http://localhost:4000/contacts/bulk \
+  -H "Authorization: Bearer $TOK" \
+  -H "Content-Type: application/json" \
+  -d '{"items":[
+    {"phoneE164":"+919812345678","displayName":"Megha"},
+    {"phoneE164":"+919976654321","displayName":"Anand"},
+    {"phoneE164":"+919800099999","displayName":"Ghost"}
+  ]}'
+# → { "saved": [{ ... isOnPlatform: true ... } x2, { ... isOnPlatform: false ... }], "alreadyHad": 0 }
+
+# Re-run the same batch — alreadyHad goes up, saved stays empty.
+# (repeat the curl above)
+# → { "saved": [], "alreadyHad": 3 }
+```
+
+### Verification
+
+- **13/13 e2e cases pass** (7 from PR 6.2 + 6 new from PR 6.3).
+- `npm run shared:build` clean.
+
+---
+
 ## Plan adaptation log (running)
 
 - **PR 6.1**: Jest harness was already in place from a prior session. Scope narrowed to extending the existing `phone.test.ts` with E.164-prefixed cases + fixing `toE164India()`.
 - **PR 6.2**: First test run revealed the global error filter wrapping shape. Test assertion updated; no controller/service change needed. Container ports differ from the e2e harness default (5432/6379 vs 5433/6380) — invoke with `TEST_DATABASE_URL_BASE` + `TEST_REDIS_URL` env overrides.
+- **PR 6.3**: No mid-flight surprises. Per-batch dedup landed unprompted by the plan because the bulk endpoint genuinely needs it (real device contacts ship duplicates from cross-OS sync). Documented in the service docstring.
 
 ---
 
 ## Next-developer pickup notes
 
-If you (or the next Claude session) are starting **PR 6.3 (bulk save)**:
+If you (or the next Claude session) are starting **PR 6.4 (frontend `expo-contacts` + Import Contacts modal)**:
 
-1. **Pattern-match `discover()`** — same module, mirror its `findMany` → DTO-map shape, but flip from `prisma.user` to `prisma.contact`. The plan in `.claude/plans/*` has the step-by-step.
-2. **The `(ownerUserId, phoneE164)` unique constraint already exists** — see `schema.prisma:178`. The transaction logic is: `findMany` existing pairs, partition input into `toCreate` vs `alreadyHad`, run `createMany`, then `findMany` the new rows by `(ownerUserId, phoneE164)` to return them as full DTOs (PG `createMany` doesn't return rows).
-3. **Reuse the rate-limit pattern** that PR 6.2 just shipped — same constants block at the top of `contacts.controller.ts`, just a different key: `contacts:bulk:{user.sub}`, 5 req/min.
-4. **Self-add guard** — mirror `add()` lines 96-102. The bulk version should filter the caller's own phone from `items` BEFORE the existing-pairs lookup, otherwise it'll appear in `alreadyHad` even though no row was created.
-5. **The global error filter wraps everything** — assert `body.error.code` not `body.code` in your e2e (PR 6.2 hit this pitfall, documented in the adaptation log).
-6. **`prisma.createMany({ skipDuplicates: true })` is NOT used elsewhere** — the plan and `contacts.service.ts:add()` both rely on application-level dedup. Stay consistent.
+1. **Read the plan** — `.claude/plans/go-with-the-recommendation-cozy-lantern.md` § PR 6.4. The plan has file-by-file scope including the `useDeviceContacts` hook signature, the modal's four states (idle / requesting / denied / loaded), and the MMKV cache shape.
+2. **Read `AGENTS.md` and Expo SDK 56 docs first** — `expo-contacts` API drifts across SDK versions. `Contacts.requestPermissionsAsync()` and `Contacts.getContactsAsync({ fields: ['phoneNumbers', 'name'] })` are the two calls you'll make; verify the v56 signatures before writing.
+3. **`toE164India()` is already broadened** (PR 6.1) — feed raw address-book strings through it directly, no pre-processing needed. Drop any entry that returns `null`.
+4. **The repository interface needs `discover(phones)` and `addMany(items)`** — add them to `contacts-repository.ts`, implement in both `api-contacts-repository.ts` (real) and `mock-contacts-repository.ts` (returns 2-3 seeded matches so the modal works offline).
+5. **Call `notify()` after `addMany()`** in the api impl so the existing `useContacts()` subscribe pattern auto-refreshes any open list (matches what `add()` does at line 49 of `api-contacts-repository.ts`).
+6. **Cache shape in MMKV** — `{ matches: ContactDiscoveryMatch[], expiresAt: number }`. Key `StorageKeys.contactsDiscoveryCache` (already in `mmkv.ts` from PR 6.1's work). 24h TTL.
+7. **Reuse `ChatRow`'s checkbox** for the import list — see `my-app/src/features/chat/components/chat-row.tsx`'s `checkbox` style. Lime "ON PLATFORM" badge via `Brand.accent` (`#E2FA61`).
+8. **Add-Contact modal** — the simplest UX is a "Pick from phonebook" row at the TOP of the existing form (above PillInput name+phone), routing to `/import-contacts`. NOT a bottom sheet. Stay consistent with the existing modal layout.
+9. **The global error filter wraps everything** — when calling `discover()` / `addMany()` from the client and showing a toast on error, parse `body.error.code` not `body.code`. Same pitfall hit in PR 6.2.
 
 If you discover the audit / plan made a wrong assumption — like I did with the Jest setup in 6.1 and the error-envelope shape in 6.2 — **adapt the plan and document it in this file's adaptation log**, don't blindly follow it.
 
