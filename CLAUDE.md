@@ -63,7 +63,7 @@ npm run db:setup:dry           # walk through every step without executing it
 |---|---|---|---|
 | Welcome / Terms / Phone | ✅ | n/a | UI only |
 | Contact Page (chat list home) | ✅ live | ✅ live | Figma "Contact Page" frame (Base / 3-dot / Plus / Filter variants). Theme toggle, /new-chat → real /contacts, multi-select bulk actions, user-defined filters. See `docs/progress/contact-page.md`. |
-| Device Contacts Sync | 🚧 partial | ✅ backend live | PR 6.1+6.2+6.3 shipped — shared schemas, expanded `toE164India`, `POST /contacts/discover` (stateless lookup, rate-limited 10/min, no `userId` leak) AND `POST /contacts/bulk` (idempotent batch save, 5/min, transaction-based dedup, per-batch dedup, self-add filter). 13/13 e2e green. PR 6.4 (frontend `expo-contacts` + Import Contacts modal) pending. See `docs/progress/device-contacts.md`. |
+| Device Contacts Sync | ✅ live | ✅ live | PR 6 complete (6.1+6.2+6.3+6.4). Backend: `/contacts/discover` (stateless, 10/min, no `userId` leak) + `/contacts/bulk` (idempotent batch save, 5/min, transactional dedup); 13/13 e2e green. Frontend: `expo-contacts` plugin, `useDeviceContacts` state-machine hook (chunked discovery, 24h MMKV cache), `/import-contacts` modal with 5 UI states, "Pick from phonebook" entry in Add Contact. **Requires `npx expo prebuild && expo run:android` to pick up the native module.** See `docs/progress/device-contacts.md`. |
 | OTP request | ✅ (mock) | ✅ | MSG91 + Redis + rate limit |
 | OTP verify | ✅ mock + real | ✅ argon2 + Redis | argon2-compares against Redis, attempts counter with lockout, burns key on success, mints JWT pair, marks `otp_requests` row VERIFIED |
 | Profile (`/me`) | ✅ (mock + real) | ✅ | JWT-guarded GET + PATCH |

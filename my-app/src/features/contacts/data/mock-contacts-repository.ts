@@ -1,4 +1,11 @@
-import type { AddContactBody, Contact, UpdateContactBody } from '@scalechat/shared';
+import type {
+  AddContactBody,
+  BulkAddContactsBody,
+  BulkAddContactsResponse,
+  Contact,
+  DiscoverContactsResponse,
+  UpdateContactBody,
+} from '@scalechat/shared';
 
 import { SEED_CONTACTS } from '@/features/chat/data/seed';
 
@@ -92,6 +99,56 @@ export const mockContactsRepository: ContactsRepository = {
     if (idx === -1) throw new Error('Contact not found');
     cache.splice(idx, 1);
     notify();
+  },
+
+  async discover(phones: string[]): Promise<DiscoverContactsResponse> {
+    await sleep();
+    // Treat every seeded mock contact as "on platform" — the mock seam is
+    // for offline UI development, not a faithful backend simulation. The
+    // hook + screen need *something* to match against; the seed is it.
+    const matchSet = new Set(phones);
+    const matches = cache
+      .filter((c) => matchSet.has(c.phoneE164))
+      .map((c) => ({
+        phoneE164: c.phoneE164,
+        isOnPlatform: true as const,
+        displayName: c.displayName,
+        avatarUri: c.avatarUri,
+      }));
+    return { matches };
+  },
+
+  async addMany(body: BulkAddContactsBody): Promise<BulkAddContactsResponse> {
+    await sleep();
+    // Per-batch dedup (mirror server logic) + skip already-saved phones.
+    const seen = new Set<string>();
+    const unique = body.items.filter((item) => {
+      if (seen.has(item.phoneE164)) return false;
+      seen.add(item.phoneE164);
+      return true;
+    });
+    const saved: Contact[] = [];
+    let alreadyHad = 0;
+    for (const item of unique) {
+      if (cache.some((c) => c.phoneE164 === item.phoneE164)) {
+        alreadyHad += 1;
+        continue;
+      }
+      const created: Contact = {
+        id: uuid(),
+        contactUserId: null,
+        phoneE164: item.phoneE164,
+        displayName: item.displayName,
+        favouriteAt: null,
+        avatarUri: null,
+        isOnPlatform: false,
+        createdAt: new Date().toISOString(),
+      };
+      cache.unshift(created);
+      saved.push(created);
+    }
+    if (saved.length > 0) notify();
+    return { saved, alreadyHad };
   },
 
   subscribe(listener) {

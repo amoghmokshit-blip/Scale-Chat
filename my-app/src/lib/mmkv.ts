@@ -25,6 +25,13 @@ export const StorageKeys = {
   themeMode: 'app.themeMode.v1',
   /** Local cache of /chats/filters so the filter menu paints without a network round-trip. */
   chatFiltersCache: 'chat.filters.cache.v1',
+  /**
+   * Device-contacts discovery cache — `{ matches: ContactDiscoveryMatch[],
+   * expiresAt: number }`. 24h TTL so re-opening Import Contacts within a
+   * day skips both the OS permission re-prompt cost AND the
+   * `Contacts.getContactsAsync()` + discovery round-trip.
+   */
+  contactsDiscoveryCache: 'contacts.discovery.cache.v1',
 } as const;
 
 export function setJson<T>(key: string, value: T): void {

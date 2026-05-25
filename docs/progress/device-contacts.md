@@ -4,7 +4,7 @@
 |---|---|
 | **Owner** | Surya (founder) — implementation in progress |
 | **Slice** | 1-on-1 — Device Contacts Sync (BRD §4.20, §12) |
-| **Status** | **In progress** (PR 6.1 of 4 shipped) |
+| **Status** | ✅ **Shipped** — all 4 sub-PRs landed |
 | **Plan** | `C:\Users\surya\.claude\plans\go-with-the-recommendation-cozy-lantern.md` |
 | **BRD** | [`docs/brd/1-on-1.md`](../brd/1-on-1.md) §4.20, §12 |
 
@@ -16,8 +16,8 @@
 |---|---|---|
 | **6.1 — Shared schemas + Jest harness** | Discover/Bulk zod schemas; expand `toE164India` for E.164-prefixed input; add edge-case tests | ✅ Shipped (`07a61b3`) |
 | **6.2 — Backend `POST /contacts/discover`** | Stateless discovery, rate-limited, privacy-shaped response, first contacts e2e spec | ✅ Shipped (`cb3a9fd`) |
-| **6.3 — Backend `POST /contacts/bulk`** | Idempotent bulk save, transaction-based dedup | ✅ **Shipped** (this commit) |
-| **6.4 — Frontend `expo-contacts` + Import Contacts modal** | `useDeviceContacts` hook, `/import-contacts` screen, "Pick from phonebook" entry | 🚧 Pending |
+| **6.3 — Backend `POST /contacts/bulk`** | Idempotent bulk save, transaction-based dedup | ✅ Shipped (`00b3bd3`) |
+| **6.4 — Frontend `expo-contacts` + Import Contacts modal** | `useDeviceContacts` hook, `/import-contacts` screen, "Pick from phonebook" entry | ✅ **Shipped** (this commit) |
 
 ---
 
@@ -166,29 +166,71 @@ curl -X POST http://localhost:4000/contacts/bulk \
 
 ---
 
+## PR 6.4 — What shipped
+
+### Native module + config
+
+- **`my-app/package.json`** — `expo-contacts: "~56.0.7"` installed via `npx expo install expo-contacts` (SDK-pinned).
+- **`my-app/app.json`** — `expo-contacts` plugin entry with the `contactsPermission` string ("ScaleChat looks at your contacts to find friends who already use the app. We never upload your full address book — only matches are shown, and nothing is saved until you tap Save.") The Expo config plugin auto-injects iOS `NSContactsUsageDescription` and Android `READ_CONTACTS` at prebuild time.
+
+### Files touched / created
+
+- **`my-app/src/features/contacts/data/contacts-repository.ts`** — interface extended with `discover(phones)` and `addMany(body)`. Both impls keep their respective contracts (api vs mock).
+- **`my-app/src/features/contacts/data/api-contacts-repository.ts`** — calls `/contacts/discover` and `/contacts/bulk`. `addMany` fires `notify()` after success so any open `useContacts()` consumer (e.g. /new-chat search list) auto-refreshes.
+- **`my-app/src/features/contacts/data/mock-contacts-repository.ts`** — `discover` intersects the seed against the submitted phones; `addMany` mirrors server-side per-batch dedup + already-had partitioning.
+- **`my-app/src/features/contacts/hooks/use-device-contacts.ts`** (new) — state-machine hook (`idle | requesting | denied | loading | ready | error`). On grant: reads `Contacts.getContactsAsync`, normalises every phone via `toE164India()`, dedups, chunks discovery into 500-phone batches (50ms pause between chunks), persists results to MMKV with a 24h TTL.
+- **`my-app/src/app/(modals)/import-contacts.tsx`** (new) — the screen. Renders one of five centered callouts (idle/requesting/denied/loading/error) OR the matches FlatList with checkbox + "Select all" + sticky "Save N selected" bottom CTA. Lime "ON PLATFORM" badge on every match.
+- **`my-app/src/app/(modals)/add-contact.tsx`** — added "Pick from phonebook" entry row at the TOP of the existing form, with a "or add manually" divider below. Manual entry stays unchanged.
+- **`my-app/src/lib/mmkv.ts`** — added `StorageKeys.contactsDiscoveryCache = 'contacts.discovery.cache.v1'` (was missing from PR 6.1).
+
+### Behavior notes worth knowing
+
+1. **Cache TTL is 24h**, matching the BRD's "X joined ScaleChat" delayed-ping UX. Re-opening Import Contacts within a day skips BOTH the OS permission re-prompt AND the device/network round-trip.
+2. **Chunked discovery** — `/contacts/discover` caps at 500 phones per request and rate-limits to 10/min/user. A 2500-contact phone book → 5 chunks; the 50ms pause between chunks keeps the server from seeing one user as a burst attacker.
+3. **`isMounted` ref in the hook** guards against navigation-away mid-fetch on phones with large address books (`getContactsAsync` can take 2-5s).
+4. **Old-dev-client fallback** — the hook catches `getPermissionsAsync()` throwing (happens when JS loads against an APK that doesn't have the native module linked yet). Status falls back to `idle`; the actual error surfaces only when the user taps "Continue".
+5. **Re-discover resets selections** — `selectedInMatches` filters out phone keys no longer in the matches array, so pull-to-refresh doesn't leave dangling check marks.
+6. **`Alert` instead of toast** — the codebase doesn't have a toast primitive. Save success / error use the existing `Alert.alert` pattern (matches `/add-contact`).
+
+### ⚠️ Native rebuild required before testing
+
+Because `expo-contacts` adds Kotlin code to the dev client, the existing APK on the emulator can't see the new module. Before manual testing:
+
+```
+cd my-app
+npx expo prebuild       # regenerate android/ + ios/ with the new plugin
+npx expo run:android    # build + install the dev client
+```
+
+The JS bundle will still load against the OLD APK, but `Contacts.requestPermissionsAsync()` will throw at runtime ("native module not linked") until the rebuild lands.
+
+### Verification (next session, after rebuild)
+
+1. Permission denial path — fresh install (`adb shell pm clear com.surya_expo88.myapp`), sign in, ⊕ → Add Contact → Pick from phonebook → deny permission → "Open Settings" callout.
+2. Permission grant + matches — emulator address book empty by default → seed via the emulator's Contacts app or `adb shell content insert` → Import Contacts lists the matches with lime "ON PLATFORM" badges.
+3. Save flow — tick 3 matches → tap "Save 3 selected" → Alert dismisses → ⊕ → New Chat shows the newly-saved contacts (subscribe invalidation).
+4. Cache freshness — re-open Import Contacts within 60s → no permission prompt, no device read (verify in console).
+5. Mock parity — `EXPO_PUBLIC_USE_MOCKS=true`, kill+restart Metro with `--clear` → Import Contacts works against seeded mocks without hitting the API.
+
+---
+
 ## Plan adaptation log (running)
 
 - **PR 6.1**: Jest harness was already in place from a prior session. Scope narrowed to extending the existing `phone.test.ts` with E.164-prefixed cases + fixing `toE164India()`.
 - **PR 6.2**: First test run revealed the global error filter wrapping shape. Test assertion updated; no controller/service change needed. Container ports differ from the e2e harness default (5432/6379 vs 5433/6380) — invoke with `TEST_DATABASE_URL_BASE` + `TEST_REDIS_URL` env overrides.
 - **PR 6.3**: No mid-flight surprises. Per-batch dedup landed unprompted by the plan because the bulk endpoint genuinely needs it (real device contacts ship duplicates from cross-OS sync). Documented in the service docstring.
+- **PR 6.4**: Plan said `StorageKeys.contactsDiscoveryCache` would land in PR 6.1; it didn't. Added in PR 6.4 instead. `ApiError` in `lib/api-client.ts` already unwraps the global error envelope (the wrapper code I started with assumed `err.body` was a raw response — fixed before commit). The plan called for a separate `src/components/menu/popover-menu.tsx` based choice sheet between phonebook vs manual; chose a simpler inline "Pick from phonebook" row + "or add manually" divider, which matches the modal's visual rhythm without adding a sheet primitive.
 
 ---
 
 ## Next-developer pickup notes
 
-If you (or the next Claude session) are starting **PR 6.4 (frontend `expo-contacts` + Import Contacts modal)**:
+PR 6 is shipped. Follow-up tickets (not in scope here):
 
-1. **Read the plan** — `.claude/plans/go-with-the-recommendation-cozy-lantern.md` § PR 6.4. The plan has file-by-file scope including the `useDeviceContacts` hook signature, the modal's four states (idle / requesting / denied / loaded), and the MMKV cache shape.
-2. **Read `AGENTS.md` and Expo SDK 56 docs first** — `expo-contacts` API drifts across SDK versions. `Contacts.requestPermissionsAsync()` and `Contacts.getContactsAsync({ fields: ['phoneNumbers', 'name'] })` are the two calls you'll make; verify the v56 signatures before writing.
-3. **`toE164India()` is already broadened** (PR 6.1) — feed raw address-book strings through it directly, no pre-processing needed. Drop any entry that returns `null`.
-4. **The repository interface needs `discover(phones)` and `addMany(items)`** — add them to `contacts-repository.ts`, implement in both `api-contacts-repository.ts` (real) and `mock-contacts-repository.ts` (returns 2-3 seeded matches so the modal works offline).
-5. **Call `notify()` after `addMany()`** in the api impl so the existing `useContacts()` subscribe pattern auto-refreshes any open list (matches what `add()` does at line 49 of `api-contacts-repository.ts`).
-6. **Cache shape in MMKV** — `{ matches: ContactDiscoveryMatch[], expiresAt: number }`. Key `StorageKeys.contactsDiscoveryCache` (already in `mmkv.ts` from PR 6.1's work). 24h TTL.
-7. **Reuse `ChatRow`'s checkbox** for the import list — see `my-app/src/features/chat/components/chat-row.tsx`'s `checkbox` style. Lime "ON PLATFORM" badge via `Brand.accent` (`#E2FA61`).
-8. **Add-Contact modal** — the simplest UX is a "Pick from phonebook" row at the TOP of the existing form (above PillInput name+phone), routing to `/import-contacts`. NOT a bottom sheet. Stay consistent with the existing modal layout.
-9. **The global error filter wraps everything** — when calling `discover()` / `addMany()` from the client and showing a toast on error, parse `body.error.code` not `body.code`. Same pitfall hit in PR 6.2.
-
-If you discover the audit / plan made a wrong assumption — like I did with the Jest setup in 6.1 and the error-envelope shape in 6.2 — **adapt the plan and document it in this file's adaptation log**, don't blindly follow it.
+1. **Re-sync on app foreground** — currently we re-discover only on Import Contacts mount. A common UX upgrade is to silently re-run discovery when the app comes back from background after >24h, so the "X joined ScaleChat" notification can fire without the user opening the modal. Needs `AppState` listener + push-notification slice (not yet shipped).
+2. **Bulk delete** — no way to bulk-remove contacts today. `DELETE /contacts/bulk` would mirror the new bulk save.
+3. **Avatar resolution** — `ContactDiscoveryMatch.avatarUri` exists in the response but most platform users won't have an avatar set yet. When they do, the import row should render their photo instead of the first-letter fallback.
+4. **Telemetry** — no analytics on how many users tap "Pick from phonebook" vs manual. Once an analytics SDK lands, this is the most informative funnel to instrument.
 
 ### Running e2e tests locally
 

@@ -1,7 +1,10 @@
 import type {
   AddContactBody,
+  BulkAddContactsBody,
+  BulkAddContactsResponse,
   Contact,
   ContactsListResponse,
+  DiscoverContactsResponse,
   UpdateContactBody,
 } from '@scalechat/shared';
 
@@ -37,6 +40,18 @@ export const apiContactsRepository: ContactsRepository = {
   async remove(id: string) {
     await apiClient.del<void>(`/contacts/${id}`);
     notify();
+  },
+  async discover(phones: string[]) {
+    // Stateless on the server — no notify() needed. The caller (useDeviceContacts)
+    // is responsible for caching the response in MMKV with a TTL.
+    return apiClient.post<DiscoverContactsResponse>('/contacts/discover', { phones });
+  },
+  async addMany(body: BulkAddContactsBody) {
+    const out = await apiClient.post<BulkAddContactsResponse>('/contacts/bulk', body);
+    // notify() so any open useContacts() consumer (e.g. /new-chat search list)
+    // auto-refreshes via the existing subscribe pattern.
+    notify();
+    return out;
   },
   subscribe(listener) {
     listeners.add(listener);

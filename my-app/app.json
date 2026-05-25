@@ -48,6 +48,12 @@
           "photosPermission": "ScaleChat needs photo library access so you can share images in chats.",
           "cameraPermission": "ScaleChat needs camera access so you can take photos to share in chats."
         }
+      ],
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "ScaleChat looks at your contacts to find friends who already use the app. We never upload your full address book — only matches are shown, and nothing is saved until you tap Save."
+        }
       ]
     ],
     "experiments": {
