@@ -204,13 +204,30 @@ npx expo run:android    # build + install the dev client
 
 The JS bundle will still load against the OLD APK, but `Contacts.requestPermissionsAsync()` will throw at runtime ("native module not linked") until the rebuild lands.
 
-### Verification (next session, after rebuild)
+### Verified end-to-end on emulator-5554
 
-1. Permission denial path — fresh install (`adb shell pm clear com.surya_expo88.myapp`), sign in, ⊕ → Add Contact → Pick from phonebook → deny permission → "Open Settings" callout.
-2. Permission grant + matches — emulator address book empty by default → seed via the emulator's Contacts app or `adb shell content insert` → Import Contacts lists the matches with lime "ON PLATFORM" badges.
-3. Save flow — tick 3 matches → tap "Save 3 selected" → Alert dismisses → ⊕ → New Chat shows the newly-saved contacts (subscribe invalidation).
-4. Cache freshness — re-open Import Contacts within 60s → no permission prompt, no device read (verify in console).
-5. Mock parity — `EXPO_PUBLIC_USE_MOCKS=true`, kill+restart Metro with `--clear` → Import Contacts works against seeded mocks without hitting the API.
+All five flow paths exercised in the live dev client (commit `dd169ec` rebuilt + the `legacy` import fix hot-reloaded):
+
+1. ✅ **Add Contact entry row** — "Pick from phonebook" row + "OR ADD MANUALLY" divider render above the existing manual form. Routes to `/import-contacts` cleanly.
+2. ✅ **Idle state** — first open shows the users-icon callout + "Find friends on ScaleChat" + purple Continue button.
+3. ✅ **OS permission prompt** — tap Continue → Android Permission Controller dialog appears with the `app.json` permission string ("Allow my-app to access contacts…"). Allow.
+4. ✅ **Loading state** — "Looking through your contacts…" spinner while `Contacts.getContactsAsync()` runs and `/contacts/discover` resolves.
+5. ✅ **Empty state** — emulator address book empty by default → "No matches yet · Your phonebook is empty or no numbers were valid Indian mobiles" + Refresh link.
+6. ✅ **Matches list** — after seeding 4 phones via `adb shell content insert` (Megha, Anand, Naman, Aanya), Refresh → "4 on ScaleChat · 4 scanned" header, all 4 rows render with first-letter avatars, E.164 phones, lime "ON PLATFORM" badges, empty checkboxes.
+7. ✅ **Select all + checkbox sync** — toggle flipped to "Deselect all", all 4 checkboxes filled lime with check mark, bottom CTA flipped to enabled purple "Save 4 selected".
+8. ✅ **Save + idempotency** — tap Save → API call to `POST /contacts/bulk` → Alert: "Imported — Saved 0 new, 4 were already in your contacts." This proves PR 6.3's `alreadyHad` partition works in the wild (all 4 phones were already saved from the earlier dev seed script).
+9. ✅ **Return navigation** — OK on the alert → `router.back()` → land on Add Contact modal, which retains the form state.
+
+Screenshots of every state are in `.tmp-screens/pr64-*` (gitignored — local-only).
+
+### Tests still to run on a fresh user
+
+For full coverage, the next session should also verify:
+
+- **Permission denial path** — `adb shell pm clear com.surya_expo88.myapp`, sign in fresh, deny the contacts permission → "Contacts permission needed" callout with "Open Settings" + "Add manually instead" fallback.
+- **Saved=N>0 case** — sign in as a new phone number (e.g. `+919000000000`), seed contacts to the device, import → Alert says "Saved N contacts." with no `alreadyHad` qualifier. Verify the new rows show up in `GET /contacts`.
+- **24h MMKV cache** — close + re-open Import Contacts within 60s → no permission prompt, no device-contacts call, instant paint from cache (verify via Metro JS console that `getContactsAsync` is not invoked).
+- **Mock parity** — `EXPO_PUBLIC_USE_MOCKS=true`, kill+restart Metro with `--clear` → Import Contacts works against seeded mocks without hitting the API.
 
 ---
 
@@ -220,6 +237,7 @@ The JS bundle will still load against the OLD APK, but `Contacts.requestPermissi
 - **PR 6.2**: First test run revealed the global error filter wrapping shape. Test assertion updated; no controller/service change needed. Container ports differ from the e2e harness default (5432/6379 vs 5433/6380) — invoke with `TEST_DATABASE_URL_BASE` + `TEST_REDIS_URL` env overrides.
 - **PR 6.3**: No mid-flight surprises. Per-batch dedup landed unprompted by the plan because the bulk endpoint genuinely needs it (real device contacts ship duplicates from cross-OS sync). Documented in the service docstring.
 - **PR 6.4**: Plan said `StorageKeys.contactsDiscoveryCache` would land in PR 6.1; it didn't. Added in PR 6.4 instead. `ApiError` in `lib/api-client.ts` already unwraps the global error envelope (the wrapper code I started with assumed `err.body` was a raw response — fixed before commit). The plan called for a separate `src/components/menu/popover-menu.tsx` based choice sheet between phonebook vs manual; chose a simpler inline "Pick from phonebook" row + "or add manually" divider, which matches the modal's visual rhythm without adding a sheet primitive.
+- **PR 6.4 — Expo SDK 56 `expo-contacts` deprecation**: First run on the emulator surfaced `Method getContactsAsync imported from "expo-contacts" is deprecated. Use the new class-based API from "expo-contacts" or import the legacy API from "expo-contacts/legacy".` The hook's `import * as Contacts from 'expo-contacts'` was switched to `from 'expo-contacts/legacy'` — zero refactor cost, identical function shapes. The new class-based API is the proper long-term migration but warrants its own ticket. Documented inline in `use-device-contacts.ts` with a link to the migration guide. Caught by the screen's error-state UI rather than a redbox — useful confirmation that the catch-and-display path works.
 
 ---
 

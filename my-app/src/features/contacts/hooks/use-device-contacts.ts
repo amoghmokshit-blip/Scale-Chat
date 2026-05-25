@@ -1,4 +1,12 @@
-import * as Contacts from 'expo-contacts';
+// Expo SDK 56 deprecated the top-level `expo-contacts` API (it now throws when
+// called from the package root) and routed callers to either the new class-
+// based API or the `/legacy` re-export. We're using `/legacy` here because:
+//   1. The two calls we make (`requestPermissionsAsync`, `getContactsAsync`)
+//      are identical in shape — zero refactor cost.
+//   2. The new class-based API would land as its own ticket alongside any
+//      other places we call into expo-contacts (none today).
+// Migration guide: https://docs.expo.dev/guides/sdk-libraries-migration/contacts/
+import * as Contacts from 'expo-contacts/legacy';
 import type { ContactDiscoveryMatch } from '@scalechat/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
