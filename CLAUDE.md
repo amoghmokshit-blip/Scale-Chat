@@ -63,6 +63,7 @@ npm run db:setup:dry           # walk through every step without executing it
 |---|---|---|---|
 | Welcome / Terms / Phone | ✅ | n/a | UI only |
 | Contact Page (chat list home) | ✅ live | ✅ live | Figma "Contact Page" frame (Base / 3-dot / Plus / Filter variants). Theme toggle, /new-chat → real /contacts, multi-select bulk actions, user-defined filters. See `docs/progress/contact-page.md`. |
+| Device Contacts Sync | 🚧 partial | 🚧 partial | PR 6.1 shipped — shared `DiscoverContactsSchema` + `BulkAddContactsSchema` + expanded `toE164India` for E.164-prefixed input. PR 6.2 (discover endpoint) / 6.3 (bulk endpoint) / 6.4 (frontend `expo-contacts` + Import Contacts modal) pending. See `docs/progress/device-contacts.md`. |
 | OTP request | ✅ (mock) | ✅ | MSG91 + Redis + rate limit |
 | OTP verify | ✅ mock + real | ✅ argon2 + Redis | argon2-compares against Redis, attempts counter with lockout, burns key on success, mints JWT pair, marks `otp_requests` row VERIFIED |
 | Profile (`/me`) | ✅ (mock + real) | ✅ | JWT-guarded GET + PATCH |

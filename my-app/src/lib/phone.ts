@@ -7,9 +7,33 @@ export function digitsOnly(value: string): string {
   return value.replace(/\D/g, '');
 }
 
-/** True when the 10-digit Indian mobile number is valid (mobile-only, not landline). */
+/**
+ * Reduce any common Indian phone-input shape to exactly 10 local digits.
+ *
+ * Handles the formats that real device address books produce — users save
+ * their contacts as:
+ *   • "9876543210"          → "9876543210"  (bare local)
+ *   • "98765 43210"         → "9876543210"  (formatted local)
+ *   • "+91 98765 43210"     → "9876543210"  (E.164 with country code)
+ *   • "+91-98765-43210"     → "9876543210"  (E.164 with separators)
+ *   • "919876543210"        → "9876543210"  (country code, no plus)
+ *   • "09876543210"         → "9876543210"  (legacy STD prefix)
+ *
+ * Returns the 10-digit slice when recognisable, else the raw cleaned digits
+ * so the caller's length check can still reject it.
+ */
+function toLocalDigits(value: string): string {
+  let cleaned = digitsOnly(value);
+  // E.164 / country-code prefix: 12 digits starting with "91"
+  if (cleaned.length === 12 && cleaned.startsWith('91')) cleaned = cleaned.slice(2);
+  // Legacy STD prefix: 11 digits starting with "0"
+  else if (cleaned.length === 11 && cleaned.startsWith('0')) cleaned = cleaned.slice(1);
+  return cleaned;
+}
+
+/** True when the input resolves to a valid Indian mobile (mobile-only, not landline). */
 export function isValidIndianMobile(localDigits: string): boolean {
-  const cleaned = digitsOnly(localDigits);
+  const cleaned = toLocalDigits(localDigits);
   if (cleaned.length !== 10) return false;
   // Indian mobile numbers start with 6, 7, 8, or 9.
   if (!/^[6-9]/.test(cleaned)) return false;
@@ -24,10 +48,10 @@ export function formatIndianMobile(localDigits: string): string {
   return `+91 ${cleaned.slice(0, 5)} ${cleaned.slice(5)}`;
 }
 
-/** Return E.164 form for a 10-digit Indian local number, or null if invalid. */
+/** Return E.164 form for any Indian-mobile input (see `toLocalDigits`), or null. */
 export function toE164India(localDigits: string): string | null {
   if (!isValidIndianMobile(localDigits)) return null;
-  return `+91${digitsOnly(localDigits)}`;
+  return `+91${toLocalDigits(localDigits)}`;
 }
 
 /** Pull the 10 local digits out of an E.164 +91 number. */
