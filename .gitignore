@@ -19,3 +19,8 @@ coverage
 my-app/package-lock.json
 apps/*/package-lock.json
 packages/*/package-lock.json
+
+# Agent skills: vendored real copies live in .claude/skills/ (committed so
+# teammates auto-discover them on clone). .agents/ is the CLI's canonical
+# source cache (the "node_modules" of `npx skills`) — regenerable, not committed.
+.agents/
