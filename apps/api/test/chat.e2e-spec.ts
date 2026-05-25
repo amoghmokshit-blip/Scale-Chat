@@ -496,9 +496,165 @@ describe('1-on-1 chat (REST happy path)', () => {
     }
   });
 
-  // Phase 2 cases (11-13) — extended as the features land.
+  // ─── Tranche 2.E-back — Forward + Pin ─────────────────────────────────────
+
+  async function chatWith(ownerToken: string, contactUserId: string): Promise<string> {
+    const r = await authedInject(testApp, {
+      method: 'POST',
+      url: '/chats/one-on-one',
+      token: ownerToken,
+      payload: { contactUserId },
+    });
+    return r.json<{ chatId: string }>().chatId;
+  }
+  async function sendText(chatId: string, token: string, text = 'hello'): Promise<string> {
+    const r = await authedInject(testApp, {
+      method: 'POST',
+      url: `/chats/${chatId}/messages`,
+      token,
+      payload: { kind: 'TEXT', text, clientMessageId: cli() },
+    });
+    return r.json<{ id: string }>().id;
+  }
+
+  it('forward delivers a copy + sets forwardedFromMessageId + bumps forwardCount; re-forward is idempotent', async () => {
+    const sourceChat = await oneOnOne(); // alice↔bob
+    const targetChat = await chatWith(alice.accessToken, mallory.id); // alice↔mallory
+    const messageId = await sendText(sourceChat, alice.accessToken, 'forward me');
+
+    const fwd = await authedInject(testApp, {
+      method: 'POST',
+      url: `/messages/${messageId}/forward`,
+      token: alice.accessToken,
+      payload: { targetChatIds: [targetChat] },
+    });
+    expect(fwd.statusCode).toBe(201);
+    const body = fwd.json<{ items: Array<{ id: string; forwardedFromMessageId: string; replyToMessageId: string | null; chatId: string }>; skipped: unknown[] }>();
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0]?.forwardedFromMessageId).toBe(messageId);
+    expect(body.items[0]?.replyToMessageId).toBeNull();
+    expect(body.items[0]?.chatId).toBe(targetChat);
+    expect(body.skipped).toHaveLength(0);
+
+    // Re-forward same source→target: idempotent (same row id, no double count).
+    const again = await authedInject(testApp, {
+      method: 'POST',
+      url: `/messages/${messageId}/forward`,
+      token: alice.accessToken,
+      payload: { targetChatIds: [targetChat] },
+    });
+    expect(again.json<{ items: Array<{ id: string }> }>().items[0]?.id).toBe(body.items[0]?.id);
+
+    // forwardCount on the source bumped exactly once.
+    const list = await authedInject(testApp, {
+      method: 'GET',
+      url: `/chats/${sourceChat}/messages?limit=10`,
+      token: alice.accessToken,
+    });
+    const src = list.json<{ items: Array<{ id: string; forwardCount: number }> }>().items.find((m) => m.id === messageId);
+    expect(src?.forwardCount).toBe(1);
+  });
+
+  it('forward to a chat the forwarder is not in is skipped (not a 4xx)', async () => {
+    const sourceChat = await oneOnOne(); // alice↔bob
+    const foreignChat = await chatWith(bob.accessToken, mallory.id); // bob↔mallory; alice not a member
+    const messageId = await sendText(sourceChat, alice.accessToken);
+
+    const fwd = await authedInject(testApp, {
+      method: 'POST',
+      url: `/messages/${messageId}/forward`,
+      token: alice.accessToken,
+      payload: { targetChatIds: [foreignChat] },
+    });
+    expect(fwd.statusCode).toBe(201);
+    const body = fwd.json<{ items: unknown[]; skipped: Array<{ chatId: string; reason: string }> }>();
+    expect(body.items).toHaveLength(0);
+    expect(body.skipped).toEqual([{ chatId: foreignChat, reason: 'not_a_member' }]);
+  });
+
+  it('forwarding a deleted message is rejected', async () => {
+    const sourceChat = await oneOnOne();
+    const targetChat = await chatWith(alice.accessToken, mallory.id);
+    const messageId = await sendText(sourceChat, alice.accessToken, 'soon gone');
+    await authedInject(testApp, {
+      method: 'DELETE',
+      url: `/chats/${sourceChat}/messages/${messageId}?scope=everyone`,
+      token: alice.accessToken,
+    });
+    const fwd = await authedInject(testApp, {
+      method: 'POST',
+      url: `/messages/${messageId}/forward`,
+      token: alice.accessToken,
+      payload: { targetChatIds: [targetChat] },
+    });
+    expect(fwd.statusCode).toBe(403);
+  });
+
+  it('pin sets pinnedAt + lists; 4th pin → 409; unpin idempotent', async () => {
+    const chatId = await oneOnOne();
+    const ids = [
+      await sendText(chatId, alice.accessToken, 'm1'),
+      await sendText(chatId, alice.accessToken, 'm2'),
+      await sendText(chatId, alice.accessToken, 'm3'),
+      await sendText(chatId, alice.accessToken, 'm4'),
+    ];
+    for (const id of ids.slice(0, 3)) {
+      const p = await authedInject(testApp, {
+        method: 'PATCH',
+        url: `/chats/${chatId}/messages/${id}/pin`,
+        token: alice.accessToken,
+      });
+      expect(p.statusCode).toBe(200);
+      expect(p.json<{ pinnedAt: string | null }>().pinnedAt).not.toBeNull();
+    }
+    const fourth = await authedInject(testApp, {
+      method: 'PATCH',
+      url: `/chats/${chatId}/messages/${ids[3]}/pin`,
+      token: alice.accessToken,
+    });
+    expect(fourth.statusCode).toBe(409);
+
+    const pins = await authedInject(testApp, {
+      method: 'GET',
+      url: `/chats/${chatId}/pins`,
+      token: bob.accessToken,
+    });
+    expect(pins.json<{ items: unknown[] }>().items).toHaveLength(3);
+
+    // Unpin twice → both 200 (idempotent).
+    for (let i = 0; i < 2; i += 1) {
+      const u = await authedInject(testApp, {
+        method: 'DELETE',
+        url: `/chats/${chatId}/messages/${ids[0]}/pin`,
+        token: alice.accessToken,
+      });
+      expect(u.statusCode).toBe(200);
+    }
+  });
+
+  it('non-member cannot pin (403); cross-chat pin → 404', async () => {
+    const chatId = await oneOnOne(); // alice↔bob
+    const messageId = await sendText(chatId, alice.accessToken);
+
+    const byNonMember = await authedInject(testApp, {
+      method: 'PATCH',
+      url: `/chats/${chatId}/messages/${messageId}/pin`,
+      token: mallory.accessToken,
+    });
+    expect(byNonMember.statusCode).toBe(403);
+
+    // Pin a message that belongs to chatId via a DIFFERENT chat's id → 404.
+    const otherChat = await chatWith(alice.accessToken, mallory.id);
+    const crossChat = await authedInject(testApp, {
+      method: 'PATCH',
+      url: `/chats/${otherChat}/messages/${messageId}/pin`,
+      token: alice.accessToken,
+    });
+    expect(crossChat.statusCode).toBe(404);
+  });
+
+  // Phase 2 cases — extended as the features land.
   it.todo('Case 11 — Phase 2.2 Edit: in-window 200, outside-window 400 edit_window_expired');
-  it.todo('Case 12 — Phase 2.4 Forward: hop count + non-member-of-target 403');
   it.todo('Case 13 — Phase 2.5 Search: ILIKE match on TEXT only');
 });
 

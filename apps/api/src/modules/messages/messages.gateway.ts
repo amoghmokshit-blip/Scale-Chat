@@ -360,6 +360,21 @@ export class MessagesGateway
       reactions: payload.reactions,
     });
   }
+
+  /** Broadcast a pin (Tranche 2.E) so every member's pinned strip updates live. */
+  emitMessagePinned(payload: {
+    chatId: string;
+    messageId: string;
+    pinnedByUserId: string;
+    pinnedAt: string;
+  }): void {
+    this.server.to(roomFor(payload.chatId)).emit(SocketEvents.messagePinned, payload);
+  }
+
+  /** Broadcast an unpin (Tranche 2.E). */
+  emitMessageUnpinned(payload: { chatId: string; messageId: string }): void {
+    this.server.to(roomFor(payload.chatId)).emit(SocketEvents.messageUnpinned, payload);
+  }
 }
 
 function roomFor(chatId: string): string {

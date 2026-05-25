@@ -13,9 +13,11 @@ import { AuthModule } from './modules/auth/auth.module';
 import { BlocksModule } from './modules/blocks/blocks.module';
 import { ChatsModule } from './modules/chats/chats.module';
 import { ContactsModule } from './modules/contacts/contacts.module';
+import { ForwardModule } from './modules/forward/forward.module';
 import { HealthModule } from './modules/health/health.module';
 import { MediaModule } from './modules/media/media.module';
 import { MessagesModule } from './modules/messages/messages.module';
+import { PinModule } from './modules/pin/pin.module';
 import { ReactionsModule } from './modules/reactions/reactions.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { UsersModule } from './modules/users/users.module';
@@ -52,6 +54,8 @@ import { UsersModule } from './modules/users/users.module';
     ReportsModule,
     BlocksModule,
     ReactionsModule,
+    ForwardModule,
+    PinModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: HttpExceptionFilter },

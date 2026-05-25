@@ -391,7 +391,25 @@ export const SocketEvents = {
   presenceSnapshot: 'presence:snapshot',
   presenceUpdate: 'presence:update',
   reactionUpdated: 'reaction:updated',
+  messagePinned: 'message:pinned',
+  messageUnpinned: 'message:unpinned',
 } as const;
+
+/** S→C when a message is pinned (Tranche 2.E). Broadcast on `chat:{chatId}`. */
+export const SocketMessagePinnedSchema = z.object({
+  chatId: z.string().uuid(),
+  messageId: z.string().uuid(),
+  pinnedByUserId: z.string().uuid(),
+  pinnedAt: z.string().datetime(),
+});
+export type SocketMessagePinned = z.infer<typeof SocketMessagePinnedSchema>;
+
+/** S→C when a message is unpinned (Tranche 2.E). */
+export const SocketMessageUnpinnedSchema = z.object({
+  chatId: z.string().uuid(),
+  messageId: z.string().uuid(),
+});
+export type SocketMessageUnpinned = z.infer<typeof SocketMessageUnpinnedSchema>;
 
 /** GET /chats/:id — full thread detail for the chat screen. */
 export const ChatDetailSchema = z.object({

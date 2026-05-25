@@ -112,7 +112,8 @@ function buildRowToDto(media: MediaService) {
 
 @Injectable()
 export class MessagesService {
-  private readonly rowToDto: (m: MessageRow) => MessageDto;
+  /** Public so sibling modules (Pin) can map rows they loaded into the wire DTO. */
+  readonly rowToDto: (m: MessageRow) => MessageDto;
   constructor(
     private readonly prisma: PrismaService,
     private readonly media: MediaService,
@@ -429,72 +430,141 @@ export class MessagesService {
 
     const rowToDto = this.rowToDto;
 
-    // Allocate sequence under per-chat advisory lock so concurrent sends are
-    // strictly ordered. The lock key is the chat-id as bigint (first 8 bytes).
     return this.prisma.$transaction(async (tx) => {
-      const key = chatIdToAdvisoryKey(chatId);
-      await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock($1::bigint)`, key);
-
-      const max = await tx.message.aggregate({
-        where: { chatId },
-        _max: { sequence: true },
+      const created = await this.allocateAndCreate(tx, {
+        chatId,
+        senderUserId: userId,
+        clientMessageId: body.clientMessageId,
+        kind: body.kind,
+        text: body.kind === 'TEXT' ? body.text ?? null : null,
+        mediaObjectKey: MEDIA_BACKED_KINDS.has(body.kind) ? body.mediaObjectKey ?? null : null,
+        imageWidth: body.kind === 'IMAGE' ? body.imageWidth ?? null : null,
+        imageHeight: body.kind === 'IMAGE' ? body.imageHeight ?? null : null,
+        durationSec: body.kind === 'VOICE' ? body.durationSec ?? null : null,
+        waveform:
+          body.kind === 'VOICE' && body.waveform ? (body.waveform as Prisma.InputJsonValue) : Prisma.JsonNull,
+        // DOCUMENT/VIDEO MIME.
+        mediaMimeType: body.kind === 'DOCUMENT' || body.kind === 'VIDEO' ? body.mediaMimeType ?? null : null,
+        // VIDEO.
+        videoDurationSec: body.kind === 'VIDEO' ? body.videoDurationSec ?? null : null,
+        videoWidth: body.kind === 'VIDEO' ? body.videoWidth ?? null : null,
+        videoHeight: body.kind === 'VIDEO' ? body.videoHeight ?? null : null,
+        // LOCATION.
+        latitude: body.kind === 'LOCATION' ? body.latitude ?? null : null,
+        longitude: body.kind === 'LOCATION' ? body.longitude ?? null : null,
+        locationName: body.kind === 'LOCATION' ? body.locationName ?? null : null,
+        // CONTACT_CARD.
+        contactName: body.kind === 'CONTACT_CARD' ? body.contactName ?? null : null,
+        contactPhoneE164: body.kind === 'CONTACT_CARD' ? body.contactPhoneE164 ?? null : null,
+        // DOCUMENT.
+        documentTitle: body.kind === 'DOCUMENT' ? body.documentTitle ?? null : null,
+        documentSizeBytes:
+          body.kind === 'DOCUMENT' && body.documentSizeBytes !== undefined
+            ? BigInt(body.documentSizeBytes)
+            : null,
+        replyToMessageId: body.replyToMessageId ?? null,
       });
-      const next = (max._max.sequence ?? 0n) + 1n;
-
-      const created = await tx.message.create({
-        data: {
-          chatId,
-          senderUserId: userId,
-          clientMessageId: body.clientMessageId,
-          sequence: next,
-          kind: body.kind,
-          text: body.kind === 'TEXT' ? body.text ?? null : null,
-          mediaObjectKey: MEDIA_BACKED_KINDS.has(body.kind) ? body.mediaObjectKey ?? null : null,
-          imageWidth: body.kind === 'IMAGE' ? body.imageWidth ?? null : null,
-          imageHeight: body.kind === 'IMAGE' ? body.imageHeight ?? null : null,
-          durationSec: body.kind === 'VOICE' ? body.durationSec ?? null : null,
-          waveform:
-            body.kind === 'VOICE' && body.waveform ? (body.waveform as Prisma.InputJsonValue) : Prisma.JsonNull,
-          // DOCUMENT/VIDEO MIME.
-          mediaMimeType: body.kind === 'DOCUMENT' || body.kind === 'VIDEO' ? body.mediaMimeType ?? null : null,
-          // VIDEO.
-          videoDurationSec: body.kind === 'VIDEO' ? body.videoDurationSec ?? null : null,
-          videoWidth: body.kind === 'VIDEO' ? body.videoWidth ?? null : null,
-          videoHeight: body.kind === 'VIDEO' ? body.videoHeight ?? null : null,
-          // LOCATION.
-          latitude: body.kind === 'LOCATION' ? body.latitude ?? null : null,
-          longitude: body.kind === 'LOCATION' ? body.longitude ?? null : null,
-          locationName: body.kind === 'LOCATION' ? body.locationName ?? null : null,
-          // CONTACT_CARD.
-          contactName: body.kind === 'CONTACT_CARD' ? body.contactName ?? null : null,
-          contactPhoneE164: body.kind === 'CONTACT_CARD' ? body.contactPhoneE164 ?? null : null,
-          // DOCUMENT.
-          documentTitle: body.kind === 'DOCUMENT' ? body.documentTitle ?? null : null,
-          documentSizeBytes:
-            body.kind === 'DOCUMENT' && body.documentSizeBytes !== undefined
-              ? BigInt(body.documentSizeBytes)
-              : null,
-          replyToMessageId: body.replyToMessageId ?? null,
-        },
-      });
-
-      await tx.chat.update({
-        where: { id: chatId },
-        data: { lastMessageId: created.id, lastMessageAt: created.createdAt },
-      });
-
-      // Sender's own read position advances to the message they just sent.
-      await tx.chatMember.update({
-        where: { chatId_userId: { chatId, userId } },
-        data: { lastReadSequence: next },
-      });
-
       return rowToDto(created);
     });
   }
+
+  /**
+   * Load a raw message row by id (for Forward to clone). Null if not found.
+   */
+  async getMessageRow(messageId: string): Promise<MessageRow | null> {
+    return this.prisma.message.findUnique({ where: { id: messageId } });
+  }
+
+  /**
+   * Create a forwarded copy of `source` into `targetChatId` as `forwarderUserId`.
+   * Idempotent on the caller-supplied deterministic `clientMessageId` (the
+   * ForwardService hashes the source/forwarder/target triple). Clones the
+   * content columns + sets `forwardedFromMessageId`; deliberately drops
+   * `replyToMessageId` (would dangle into a chat that lacks the quoted message)
+   * and never carries the source's pin/forward bookkeeping.
+   */
+  async forwardInto(
+    forwarderUserId: string,
+    targetChatId: string,
+    source: MessageRow,
+    clientMessageId: string,
+  ): Promise<{ message: MessageDto; created: boolean }> {
+    const existing = await this.prisma.message.findUnique({
+      where: {
+        senderUserId_clientMessageId: { senderUserId: forwarderUserId, clientMessageId },
+      },
+    });
+    // Idempotent: a re-forward of the same source→target returns the prior row
+    // WITHOUT a new insert — `created:false` so the caller doesn't double-count
+    // `forwardCount`.
+    if (existing) return { message: this.rowToDto(existing), created: false };
+
+    const rowToDto = this.rowToDto;
+    return this.prisma.$transaction(async (tx) => {
+      const created = await this.allocateAndCreate(tx, {
+        chatId: targetChatId,
+        senderUserId: forwarderUserId,
+        clientMessageId,
+        kind: source.kind,
+        text: source.text,
+        mediaObjectKey: source.mediaObjectKey,
+        imageWidth: source.imageWidth,
+        imageHeight: source.imageHeight,
+        durationSec: source.durationSec,
+        waveform:
+          source.waveform === null ? Prisma.JsonNull : (source.waveform as Prisma.InputJsonValue),
+        mediaMimeType: source.mediaMimeType,
+        videoDurationSec: source.videoDurationSec,
+        videoWidth: source.videoWidth,
+        videoHeight: source.videoHeight,
+        latitude: source.latitude,
+        longitude: source.longitude,
+        locationName: source.locationName,
+        contactName: source.contactName,
+        contactPhoneE164: source.contactPhoneE164,
+        documentTitle: source.documentTitle,
+        documentSizeBytes: source.documentSizeBytes,
+        forwardedFromMessageId: source.id,
+        replyToMessageId: null,
+      });
+      return { message: rowToDto(created), created: true };
+    });
+  }
+
+  /**
+   * Shared message-creation tail used by `send` + `forwardInto`: allocate the
+   * per-chat sequence under an advisory lock, create the row, bump the chat's
+   * lastMessage pointer + the sender's own read cursor. The caller owns all
+   * validation; this just does the locked write.
+   */
+  private async allocateAndCreate(
+    tx: Prisma.TransactionClient,
+    data: Omit<Prisma.MessageUncheckedCreateInput, 'sequence'>,
+  ): Promise<MessageRow> {
+    const chatId = data.chatId;
+    const key = chatIdToAdvisoryKey(chatId);
+    await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock($1::bigint)`, key);
+
+    const max = await tx.message.aggregate({ where: { chatId }, _max: { sequence: true } });
+    const next = (max._max.sequence ?? 0n) + 1n;
+
+    const created = await tx.message.create({ data: { ...data, sequence: next } });
+
+    await tx.chat.update({
+      where: { id: chatId },
+      data: { lastMessageId: created.id, lastMessageAt: created.createdAt },
+    });
+    // Sender's own read position advances to the message they just authored.
+    await tx.chatMember.update({
+      where: { chatId_userId: { chatId, userId: data.senderUserId } },
+      data: { lastReadSequence: next },
+    });
+
+    return created;
+  }
 }
 
-function chatIdToAdvisoryKey(chatId: string): bigint {
+export function chatIdToAdvisoryKey(chatId: string): bigint {
   // Stable bigint derived from the chat-id UUID. Take the first 8 hex bytes,
   // reinterpret as a signed bigint (Postgres accepts signed bigint advisory keys).
   const hex = chatId.replace(/-/g, '').slice(0, 16);

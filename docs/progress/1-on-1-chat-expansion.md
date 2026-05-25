@@ -123,6 +123,7 @@ The 5-agent review surfaced concerns that DON'T belong in Tranche 2.0 but MUST b
 | **K8** | Backend runs on **port 4000** (`api-client.ts:52`), not 3000. Android emulator can't reach `localhost` — must use `10.0.2.2:4000`. | Any tranche where mobile + backend co-test | `my-app/.env.local` (per-developer, not committed) with `EXPO_PUBLIC_API_URL=http://10.0.2.2:4000`. Documented in `instruction-to-run-the-app.md` from Tranche 2.0. |
 | **K9** | newArch + Fabric is enabled (`gradle.properties:38`). `react-native-maps` must be ≥2.0 for Fabric compatibility, else white-screen on `<MapView>`. | 2.D | Before installing, run `npm info react-native-maps@latest` and confirm v2+. Document the pinned version in the 2.D PR. |
 | **K10** | First-build time on Windows with new native deps + WebRTC + 4-ABI is 20–45 min cold. Founder may Ctrl-C thinking it's hung. | Any native-dep tranche | Document in `instruction-to-run-the-app.md`: "First build after a new native dep takes 20–45 min on Windows. Don't kill it." Bump heap (K2) and restrict ABIs (K3) to shrink this. |
+| **K12** | **R2 media delete MUST ref-count `forwardedFromMessageId` chains.** Forwarding a DOCUMENT/IMAGE/VIDEO (Tranche 2.E) clones `mediaObjectKey` → two messages reference one R2 object. A naive future "delete object on message delete" worker would orphan/delete media still referenced by a forwarded copy (cross-chat data loss). | The R2 orphan-cleanup BRD/worker (deferred) | Before unlinking any R2 object on message delete, check no other non-deleted message references the same `mediaObjectKey` (or walk `forwardedFromMessageId` chains). Surfaced by the 2.E 3-agent review. |
 | **K11** | **Installing a dep from inside a workspace de-hoists `expo-router`.** Running `npm install <pkg>` from `my-app/` (instead of repo root) can pull `expo-router` down into `my-app/node_modules`, out of root `node_modules`. The root-level `@expo/cli` (which runs typed-routes generation) then can't resolve `expo-router/_ctx-shared` and `expo start` **crashes** with `Cannot find module 'expo-router/_ctx-shared'` (exit 7) right after "Logs for your project will appear below". Surfaced 2026-05-25 during Tranche 2.A's `rn-emoji-keyboard` install. | Every tranche that adds a dep | **Always `npm install` from the repo ROOT, never from `my-app/`** — root installs re-hoist the whole workspace graph correctly. If a crash happens: stop the backend (frees the Prisma query-engine DLL lock that otherwise EPERM-fails `prisma generate` postinstall), then `npm install` from root for a clean re-hoist. Quick unblock (non-durable): `cp -r my-app/node_modules/expo-router node_modules/expo-router`. |
 
 These items are an executable checklist — when the gating tranche begins, the implementing PR addresses its row before introducing the dep.
@@ -136,7 +137,7 @@ These items are an executable checklist — when the gating tranche begins, the 
 | **2.0** | Dev pipeline documentation | `instruction-to-run-the-app.md` + `my-app/CLAUDE.md` §7.5 + 3 helper npm scripts + Knowledge base K1–K10. **Docs-only; zero native deps installed.** ✅ LANDED 2026-05-25 (`e70ce46`). | n/a | ✅ | — | — |
 | **2.A** | Reactions mobile UI | ✅ **LANDED 2026-05-25** (`c23365f` + mock follow-up). reactions strip + pill row + `rn-emoji-keyboard` picker + socket `reaction:updated` sync + optimistic add/remove (api + mock repos). QA-passed on Android emulator: strip renders, picker opens + themed, emoji-select → pill renders. | none | ✅ | — | 2.0 |
 | **2.B** | Schema foundation | ✅ **LANDED 2026-05-25**. `MessageKind` +7 values, 16 nullable `Message` columns (Migration A), `MediaService` DOCUMENT/VIDEO, discriminated-union send validators, `SERVER_ONLY_KINDS` guard. 26/26 e2e green. | ✅ | none | A | 2.0 |
-| **2.E** | Forward + Pin + Message Info | 3 new modules + 3 new UI rows + ForwardPicker + MessageInfo screens + PinnedStrip | ✅ | ✅ | — | 2.B |
+| **2.E** | Forward + Pin (+ ~~Message Info~~ deferred) | **Split by layer.** 2.E-back (Forward + Pin modules + gateway events + e2e) ✅ **LANDED 2026-05-25**; 2.E-front (mobile UI) pending. Message-Info deferred (no `readAt`). | 🚧 front | ✅ back | — | 2.B |
 | **2.H** | Calls signalling (server) | `CallSession` table + 100ms-or-LiveKit-Cloud client + ring/accept/decline/hangup REST + webhook + **`user:{userId}` socket room** + **BullMQ ring-timeout** | ✅ | none | C | 2.B + POC complete |
 | **2.I** | Call UI + push wakeup + **EAS migration** | `UserDevice` table + push module + CallScreen + IncomingCallScreen + provider SDK install + **first tranche to require EAS Build** (push wakeup + calls can't be tested on emulator alone) | ✅ | ✅ | D | 2.H + EAS + Apple Dev account |
 | **2.C** | Document + Video kinds | wire AttachSheet tiles + bubble renderers + composer camera-shortcut | (extends 2.B) | ✅ | — | 2.B |
@@ -434,19 +435,21 @@ Plus `android.config.googleMaps.apiKey` + `ios.config.googleMapsApiKey` (or fall
 
 ## Tranche 2.E — Forward + Pin + Message Info
 
+> **Split + scoped by a 3-agent review (2026-05-25).** This tranche is delivered in two PRs by LAYER: **2.E-back** (backend, ✅ LANDED 2026-05-25) and **2.E-front** (mobile UI, pending). **Message-Info is DEFERRED entirely** — read *status* only (no `readAt` in the model) duplicates the existing lime read-tick; revisit when a real read-time exists. **Pin tap-to-scroll is deferred** (display-only strip in 2.E-front — `FlatList.scrollToIndex` foot-gun). Forward cap is 20 server-side (the old BRD "5" was a frontend UI cap → 2.E-front decides its own).
+
 ### Status table
 
 | Sub-item | Frontend | Backend | Notes |
 |---|---|---|---|
-| **E.1** `ForwardModule` | n/a | 🚫 | `POST /messages/:id/forward { targetChatIds }`; idempotent on `(originalMessageId, forwarderUserId, targetChatId)` |
-| **E.2** ForwardPickerScreen | 🚫 | n/a | Chat list with multi-select checkboxes; max 5 targets |
-| **E.3** `PinModule` | n/a | 🚫 | `PATCH/DELETE /chats/:chatId/messages/:id/pin` + `GET /chats/:chatId/pins` |
-| **E.4** Pin cap (3 per chat) | n/a | 🚫 | 4th pin returns 409 `pin_cap_exceeded` |
-| **E.5** PinnedMessageStrip component | 🚫 | n/a | Below ChatHeader; carousel-cycle for multiple pins |
-| **E.6** Socket events `message:pinned` / `message:unpinned` | n/a | 🚫 | Broadcast to `chat:{chatId}` |
-| **E.7** `GET /messages/:id/info` endpoint | n/a | 🚫 | Returns deliveredAt, readByUserIds + readAt, reactions detail, forwardCount |
-| **E.8** MessageInfoScreen | 🚫 | n/a | New modal route at `app/chat/[id]/message-info/[msgId].tsx` |
-| **E.9** MessageActionSheet — 3 new rows | 🚫 | n/a | Forward + Pin/Unpin + Message Info; conditional visibility per bubble type |
+| **E.1** `ForwardModule` | n/a | ✅ | `POST /messages/:id/forward { targetChatIds[1..20] }`. Per-target partial success (`items` + `skipped`); deterministic hashed `clientMessageId` (`fwd_`+sha256 — fits VarChar(64)); blocks tombstone + server-only kinds; `forwardCount` bumps only on newly-created copies; clones content + drops `replyToMessageId`. |
+| **E.2** ForwardPickerScreen | 🚫 (2.E-front) | n/a | Nested `chat/[id]/forward.tsx` (not global `(modals)`); multi-select; single-target → `router.replace` to dest, multi → dismiss + Alert. |
+| **E.3** `PinModule` | n/a | ✅ | `PATCH/DELETE /chats/:chatId/messages/:id/pin` + `GET /chats/:chatId/pins`. Cross-chat guard (404 `message_not_in_chat`). |
+| **E.4** Pin cap (3 per chat) | n/a | ✅ | Count+update under `pg_advisory_xact_lock(chatId)` (race-safe); 4th → 409 `pin_cap_exceeded`. |
+| **E.5** PinnedMessageStrip component | 🚫 (2.E-front) | n/a | Below ChatHeader; **display-only** (derives pins from the message cache, not a separate fetch); tap-to-scroll deferred. |
+| **E.6** Socket events `message:pinned` / `message:unpinned` | n/a | ✅ | `emitMessagePinned`/`emitMessageUnpinned` broadcast to `chat:{chatId}`. |
+| ~~**E.7** `GET /messages/:id/info`~~ | — | ⏸ DEFERRED | Read-status-only duplicates the read-tick; no `readAt` timestamp in the model. Revisit later. |
+| ~~**E.8** MessageInfoScreen~~ | — | — | Deferred with E.7. |
+| **E.9** MessageActionSheet — new rows | 🚫 (2.E-front) | n/a | Forward (both) + Pin/Unpin (both); Message Info row dropped (deferred). |
 
 ### New module — `apps/api/src/modules/forward/`
 
