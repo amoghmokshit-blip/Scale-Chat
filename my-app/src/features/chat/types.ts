@@ -5,6 +5,8 @@
  * For now we type the mock store the way the masked socket payloads will look.
  */
 
+import type { ReactionAggregate } from '@scalechat/shared';
+
 export type ThreadKind = 'direct' | 'group' | 'super';
 
 /**
@@ -72,6 +74,16 @@ export type MessageBase = {
    * is zeroed server-side.
    */
   deletedAt?: string | null;
+  /**
+   * Emoji reactions aggregated per emoji (Tranche 2.A). Empty array (default)
+   * when the message has no reactions; we keep the shape on every row so the
+   * bubble's pill renderer can do a uniform `length > 0` check.
+   *
+   * `reactedByMe` is per-viewer — the server already personalizes the bubble's
+   * MessageDto for the calling client. Socket `reaction:updated` broadcasts
+   * carry the fresh aggregate which we splice into the cached message.
+   */
+  reactions?: ReactionAggregate[];
 };
 
 export type TextMessage = MessageBase & {

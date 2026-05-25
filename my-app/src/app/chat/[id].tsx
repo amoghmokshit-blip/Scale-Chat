@@ -20,6 +20,7 @@ import { ChatHeader } from '@/features/chat/components/chat-header';
 import { ComingSoonSheet } from '@/features/chat/components/coming-soon-sheet';
 import { Composer } from '@/features/chat/components/composer';
 import { DayDivider } from '@/features/chat/components/day-divider';
+import { EmojiPickerModal } from '@/features/chat/components/emoji-picker-modal';
 import {
   MessageActionSheet,
   copyMessageText,
@@ -85,6 +86,10 @@ export default function ChatThreadScreen() {
 
   const [sheetMessage, setSheetMessage] = useState<Message | null>(null);
   const [reportTarget, setReportTarget] = useState<Message | null>(null);
+  // Tranche 2.A — full emoji picker. `pickerTargetId` holds the message id the
+  // picker reacts to once the user chooses an emoji. We keep this as id (not
+  // a Message ref) so the picker survives a cache replay that swaps the row.
+  const [pickerTargetId, setPickerTargetId] = useState<string | null>(null);
   const [attachOpen, setAttachOpen] = useState(false);
   const [recorderOpen, setRecorderOpen] = useState(false);
   const [comingSoonKey, setComingSoonKey] = useState<
@@ -123,9 +128,56 @@ export default function ChatThreadScreen() {
         replyTarget={item.replyTarget}
         counterpartName={thread?.counterpart.displayName}
         onLongPress={setSheetMessage}
+        onToggleReaction={(emoji) => void handleTogglePill(item.message, emoji)}
       />
     );
   };
+
+  // ─── Tranche 2.A reactions handlers ───────────────────────────────────────
+  // Quick-react from the strip in MessageActionSheet. Adds the emoji to the
+  // message; the strip closes the action sheet on its own. If the viewer
+  // already has another emoji on this message, the server replaces it via
+  // the `(messageId, userId, emoji)` unique — but we don't surface the
+  // pre-state in the optimistic path because reactions are idempotent + the
+  // socket broadcast reconciles in <50ms anyway.
+  async function handleQuickReact(emoji: string) {
+    const target = sheetMessage;
+    if (!target) return;
+    const fn = chatRepository.addReaction;
+    if (!fn) return;
+    try {
+      await fn.call(chatRepository, target.id, emoji);
+    } catch {
+      Alert.alert('Could not react', 'Please try again.');
+    }
+  }
+
+  // Pill-row tap. If the viewer already reacted with this emoji → remove; else add.
+  async function handleTogglePill(target: Message, emoji: string) {
+    const reactedByMe = target.reactions?.some(
+      (r) => r.emoji === emoji && r.reactedByMe,
+    );
+    const fn = reactedByMe ? chatRepository.removeReaction : chatRepository.addReaction;
+    if (!fn) return;
+    try {
+      await fn.call(chatRepository, target.id, emoji);
+    } catch {
+      Alert.alert('Could not update reaction', 'Please try again.');
+    }
+  }
+
+  // Picker → add the chosen emoji to whichever message had its strip open.
+  async function handlePickerSelect(emoji: string) {
+    const id = pickerTargetId;
+    if (!id) return;
+    const fn = chatRepository.addReaction;
+    if (!fn) return;
+    try {
+      await fn.call(chatRepository, id, emoji);
+    } catch {
+      Alert.alert('Could not react', 'Please try again.');
+    }
+  }
 
   // ─── Phase C action handlers ──────────────────────────────────────────────
   async function handleMute(until: Date | null) {
@@ -303,6 +355,23 @@ export default function ChatThreadScreen() {
           const m = sheetMessage;
           if (m) setReportTarget(m);
         }}
+        onReact={(emoji) => void handleQuickReact(emoji)}
+        onOpenEmojiPicker={() => {
+          // Close the action sheet first so the picker isn't stacked on top of
+          // the menu's dim backdrop. Capture the target id since closing the
+          // sheet nulls `sheetMessage`.
+          const m = sheetMessage;
+          if (m) {
+            setPickerTargetId(m.id);
+            setSheetMessage(null);
+          }
+        }}
+      />
+
+      <EmojiPickerModal
+        visible={pickerTargetId !== null}
+        onClose={() => setPickerTargetId(null)}
+        onSelect={(e) => void handlePickerSelect(e)}
       />
 
       <MessageReportSheet

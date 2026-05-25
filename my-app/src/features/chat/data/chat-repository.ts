@@ -98,6 +98,15 @@ export interface ChatRepository {
    */
   blockUser?(userId: string): Promise<BlockStatusResponse>;
   unblockUser?(userId: string): Promise<BlockStatusResponse>;
+  /**
+   * React to a message with an emoji (Tranche 2.A). Optimistic — the cache
+   * flips immediately and the server confirms via `reaction:updated` socket
+   * broadcast. Calling with an emoji the viewer has already reacted with is
+   * a no-op on the server (idempotent unique on `(messageId, userId, emoji)`).
+   */
+  addReaction?(messageId: string, emoji: string): Promise<void>;
+  /** Remove the viewer's own reaction. 200 even if no row existed (idempotent). */
+  removeReaction?(messageId: string, emoji: string): Promise<void>;
   /** Subscribe to repository changes (any thread/message update). */
   subscribe(listener: () => void): () => void;
 }

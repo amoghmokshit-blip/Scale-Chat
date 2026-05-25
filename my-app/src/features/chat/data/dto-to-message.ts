@@ -24,6 +24,9 @@ export function dtoToMessage(m: MessageDto, counterpartId: string): Message {
     clientMessageId: m.clientMessageId,
     replyToMessageId: m.replyToMessageId,
     deletedAt: m.deletedAt,
+    // Reactions ride on every MessageDto (defaulted to `[]` server-side per
+    // shared zod schema). Carry through so the bubble can render pills.
+    reactions: m.reactions ?? [],
   };
   if (m.kind === 'VOICE') {
     return {

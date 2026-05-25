@@ -12,6 +12,8 @@ import type {
   MessageReportAck,
   MuteChatBody,
   MuteChatResponse,
+  ReactionAggregate,
+  ReactionsList,
   SendMessageBody,
   UserProfileCard,
 } from '@scalechat/shared';
@@ -245,6 +247,67 @@ async function fetchDetail(chatId: string): Promise<ChatDetailDto> {
   return detail;
 }
 
+// ─── Reaction helpers ────────────────────────────────────────────────────────
+//
+// Used by the optimistic-update path in `addReaction` / `removeReaction` and
+// by the `reaction:updated` socket subscriber. Kept local because reactions
+// are aggregated per-emoji and the math is simple enough to inline:
+//   - add: bump count or insert; flip reactedByMe=true
+//   - remove: decrement count or drop the row; flip reactedByMe=false
+
+function locateMessage(messageId: string): { cache: ThreadCache; index: number; message: Message } | null {
+  for (const cache of cacheByChatId.values()) {
+    const index = cache.messages.findIndex((m) => m.id === messageId);
+    if (index >= 0) return { cache, index, message: cache.messages[index]! };
+  }
+  return null;
+}
+
+function bumpReactionLocally(
+  prev: ReactionAggregate[] | undefined,
+  emoji: string,
+  isAdd: boolean,
+): ReactionAggregate[] {
+  const list = prev ?? [];
+  const at = list.findIndex((r) => r.emoji === emoji);
+  if (isAdd) {
+    if (at >= 0) {
+      const row = list[at]!;
+      if (row.reactedByMe) return list; // already reacted — no-op
+      const next = list.slice();
+      next[at] = { ...row, count: row.count + 1, reactedByMe: true };
+      return next;
+    }
+    return [...list, { emoji, count: 1, reactedByMe: true }];
+  }
+  // Remove path
+  if (at < 0) return list;
+  const row = list[at]!;
+  if (!row.reactedByMe) return list; // haven't reacted — no-op
+  const nextCount = row.count - 1;
+  if (nextCount <= 0) {
+    // Drop the row entirely when nobody else has this emoji on the message.
+    return list.filter((_, i) => i !== at);
+  }
+  const next = list.slice();
+  next[at] = { ...row, count: nextCount, reactedByMe: false };
+  return next;
+}
+
+function applyAuthoritativeAggregate(messageId: string, reactions: ReactionAggregate[]): void {
+  const located = locateMessage(messageId);
+  if (!located) return;
+  located.cache.messages[located.index] = { ...located.message, reactions } as Message;
+  notify();
+}
+
+function restoreReactions(messageId: string, prev: ReactionAggregate[] | undefined): void {
+  const located = locateMessage(messageId);
+  if (!located) return;
+  located.cache.messages[located.index] = { ...located.message, reactions: prev } as Message;
+  notify();
+}
+
 // ─── Socket event wiring (one-time) ───────────────────────────────────────────
 
 let socketWired = false;
@@ -285,6 +348,21 @@ function ensureSocketWired(): void {
       changed = true;
     }
     if (changed) notify();
+  });
+
+  // When ANY user toggles a reaction on a message, the server broadcasts
+  // `reaction:updated` with the freshly-aggregated `{ emoji, count, reactedByMe }[]`
+  // for THIS viewer. Splice it into the cached row so the bubble's pill renderer
+  // sees the new state. `reactedByMe` is personalized per-viewer — the server
+  // already filtered it for us, so we can write it straight into the cache.
+  chatSocket.onReactionUpdated((r) => {
+    const cache = cacheByChatId.get(r.chatId);
+    if (!cache) return;
+    const at = cache.messages.findIndex((x) => x.id === r.messageId);
+    if (at < 0) return;
+    const prev = cache.messages[at]!;
+    cache.messages[at] = { ...prev, reactions: r.reactions } as Message;
+    notify();
   });
 
   // When a peer (or our own other device) deletes a message, the server
@@ -618,6 +696,65 @@ export const apiChatRepository: ChatRepository = {
   async reportMessage({ messageId, reason, note }) {
     const body: CreateMessageReportBody = note ? { reason, note } : { reason };
     await apiClient.post<MessageReportAck>(`/messages/${messageId}/report`, body);
+  },
+
+  /**
+   * React with `emoji`. Optimistic cache update happens BEFORE the network call:
+   *   - If the viewer already has this emoji on this message → no-op (idempotent
+   *     server-side on `(messageId, userId, emoji)` unique).
+   *   - Otherwise bump count + flip `reactedByMe: true`, inserting a new aggregate
+   *     row if this is the first reaction of that emoji.
+   * On failure we roll back so the pill doesn't show a phantom reaction.
+   * The server's `reaction:updated` socket broadcast lands shortly after the
+   * REST call returns and replaces the optimistic aggregate with the authoritative one.
+   */
+  async addReaction(messageId: string, emoji: string) {
+    const located = locateMessage(messageId);
+    const prevReactions = located?.message.reactions;
+    if (located) {
+      const next = bumpReactionLocally(prevReactions, emoji, true);
+      if (next !== prevReactions) {
+        located.cache.messages[located.index] = {
+          ...located.message,
+          reactions: next,
+        } as Message;
+        notify();
+      }
+    }
+    try {
+      const result = await apiClient.post<ReactionsList>(
+        `/messages/${messageId}/reactions`,
+        { emoji },
+      );
+      applyAuthoritativeAggregate(messageId, result.reactions);
+    } catch (err) {
+      restoreReactions(messageId, prevReactions);
+      throw err;
+    }
+  },
+
+  async removeReaction(messageId: string, emoji: string) {
+    const located = locateMessage(messageId);
+    const prevReactions = located?.message.reactions;
+    if (located) {
+      const next = bumpReactionLocally(prevReactions, emoji, false);
+      if (next !== prevReactions) {
+        located.cache.messages[located.index] = {
+          ...located.message,
+          reactions: next,
+        } as Message;
+        notify();
+      }
+    }
+    try {
+      const result = await apiClient.del<ReactionsList>(
+        `/messages/${messageId}/reactions/${encodeURIComponent(emoji)}`,
+      );
+      applyAuthoritativeAggregate(messageId, result.reactions);
+    } catch (err) {
+      restoreReactions(messageId, prevReactions);
+      throw err;
+    }
   },
 
   async getProfileCard(userId) {

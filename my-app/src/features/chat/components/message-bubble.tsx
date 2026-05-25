@@ -7,6 +7,7 @@ import { formatBubbleTime, formatDuration } from '@/lib/format-time';
 
 import type { Message } from '../types';
 import { ImageBubble } from './image-bubble';
+import { ReactionsPillRow } from './reactions-pill-row';
 import { VoicePlayer } from './voice-player';
 
 type Props = {
@@ -20,6 +21,11 @@ type Props = {
   counterpartName?: string;
   /** Long-press tap → open action sheet. */
   onLongPress?: (m: Message) => void;
+  /**
+   * Tap a reaction pill — toggles the viewer's own reaction (adds if not
+   * already reacted with that emoji, removes if `reactedByMe`). Tranche 2.A.
+   */
+  onToggleReaction?: (emoji: string) => void;
 };
 
 /**
@@ -45,6 +51,7 @@ export function MessageBubble({
   replyTarget,
   counterpartName,
   onLongPress,
+  onToggleReaction,
 }: Props) {
   const bg = isMine ? Brand.chatBubbleMine : Brand.chatBubbleTheirs;
   const color = isMine ? Brand.chatBubbleMineText : Brand.chatBubbleTheirsText;
@@ -79,6 +86,11 @@ export function MessageBubble({
           {isMine ? <DeliveryTicks status={message.status} /> : null}
           <ThemedText style={styles.meta}>{formatBubbleTime(message.createdAt)}</ThemedText>
         </View>
+        <ReactionsPillRow
+          reactions={message.reactions}
+          isMine={isMine}
+          onToggle={(e) => onToggleReaction?.(e)}
+        />
       </View>
     );
   }
@@ -159,6 +171,13 @@ export function MessageBubble({
         {isMine && !isTombstone ? <DeliveryTicks status={message.status} /> : null}
         <ThemedText style={styles.meta}>{formatBubbleTime(message.createdAt)}</ThemedText>
       </View>
+      {!isTombstone ? (
+        <ReactionsPillRow
+          reactions={message.reactions}
+          isMine={isMine}
+          onToggle={(e) => onToggleReaction?.(e)}
+        />
+      ) : null}
     </View>
   );
 }

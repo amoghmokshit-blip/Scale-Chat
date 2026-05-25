@@ -5,6 +5,7 @@ import {
   type SocketMessageSendAck,
   type SocketMessageSendPayload,
   type SocketPresenceUpdate,
+  type SocketReactionUpdated,
   type SocketReadReceipt,
   type SocketSessionResumePayload,
   type SocketSessionResumeReply,
@@ -37,6 +38,7 @@ type Listeners = {
   readReceipt: Set<(r: SocketReadReceipt) => void>;
   typing: Set<(t: SocketTypingUpdate) => void>;
   presence: Set<(p: SocketPresenceUpdate) => void>;
+  reactionUpdated: Set<(r: SocketReactionUpdated) => void>;
   connectionChange: Set<(connected: boolean) => void>;
 };
 
@@ -56,6 +58,7 @@ class ChatSocketManager {
     readReceipt: new Set(),
     typing: new Set(),
     presence: new Set(),
+    reactionUpdated: new Set(),
     connectionChange: new Set(),
   };
 
@@ -221,6 +224,11 @@ class ChatSocketManager {
     return () => this.listeners.presence.delete(listener);
   }
 
+  onReactionUpdated(listener: (r: SocketReactionUpdated) => void): () => void {
+    this.listeners.reactionUpdated.add(listener);
+    return () => this.listeners.reactionUpdated.delete(listener);
+  }
+
   onConnectionChange(listener: (connected: boolean) => void): () => void {
     this.listeners.connectionChange.add(listener);
     return () => this.listeners.connectionChange.delete(listener);
@@ -246,6 +254,9 @@ class ChatSocketManager {
     });
     socket.on(SocketEvents.presenceUpdate, (p: SocketPresenceUpdate) => {
       this.listeners.presence.forEach((l) => l(p));
+    });
+    socket.on(SocketEvents.reactionUpdated, (r: SocketReactionUpdated) => {
+      this.listeners.reactionUpdated.forEach((l) => l(r));
     });
   }
 

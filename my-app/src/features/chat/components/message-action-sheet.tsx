@@ -5,6 +5,7 @@ import { ThemedText } from '@/components/themed-text';
 import { Brand, FontWeight } from '@/constants/theme';
 
 import type { Message } from '../types';
+import { ReactionsStrip } from './reactions-strip';
 
 type Action = {
   key: string;
@@ -25,6 +26,14 @@ type Props = {
   onDelete: () => void;
   /** When provided, a "Report" row is shown on counterpart bubbles (non-tombstones). */
   onReport?: () => void;
+  /**
+   * Quick-react handler — tapping an emoji chip fires this then closes the sheet.
+   * Required for Tranche 2.A. Omitted on tombstones (we hide the strip entirely
+   * since you can't react to a deleted message).
+   */
+  onReact?: (emoji: string) => void;
+  /** Opens the full emoji picker — wired by the parent screen. */
+  onOpenEmojiPicker?: () => void;
 };
 
 /**
@@ -48,11 +57,19 @@ export function MessageActionSheet({
   onCopy,
   onDelete,
   onReport,
+  onReact,
+  onOpenEmojiPicker,
 }: Props) {
   if (!message) return null;
 
   const isTombstone = message.deletedAt != null;
   const isText = message.type === 'text';
+  // The viewer's own emoji on this message (if any) — used to highlight the
+  // matching quick-chip in the strip. There can only be one because the
+  // server enforces unique `(messageId, userId, emoji)` per-emoji and we
+  // surface only the first the viewer reacted with.
+  const myEmoji = message.reactions?.find((r) => r.reactedByMe)?.emoji ?? null;
+  const showStrip = !isTombstone && onReact != null && onOpenEmojiPicker != null;
 
   const actions: Action[] = [];
   if (!isTombstone) {
@@ -86,34 +103,53 @@ export function MessageActionSheet({
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable onPress={() => undefined} style={styles.sheet}>
-          {actions.map((a, i) => (
-            <Pressable
-              key={a.key}
-              onPress={() => {
-                a.onPress();
-                onClose();
-              }}
-              style={({ pressed }: { pressed: boolean }) => [
-                styles.row,
-                i < actions.length - 1 && styles.rowDivider,
-                pressed && { backgroundColor: 'rgba(255,255,255,0.06)' },
-              ]}>
-              <Feather
-                name={a.icon}
-                size={18}
-                color={a.destructive ? '#FF5C5C' : Brand.chatComposerIcon}
-                style={styles.icon}
+        <Pressable onPress={() => undefined} style={styles.sheetWrap}>
+          {showStrip ? (
+            <View style={styles.strip}>
+              <ReactionsStrip
+                myEmoji={myEmoji}
+                onReact={(e) => {
+                  onReact!(e);
+                  onClose();
+                }}
+                onOpenPicker={() => {
+                  // Don't close the sheet — the parent screen will close it when
+                  // the picker opens (so the picker can sit above a dimmed backdrop
+                  // without the action menu underneath).
+                  onOpenEmojiPicker!();
+                }}
               />
-              <ThemedText
-                style={[
-                  styles.label,
-                  a.destructive && { color: '#FF5C5C' },
+            </View>
+          ) : null}
+          <View style={styles.sheet}>
+            {actions.map((a, i) => (
+              <Pressable
+                key={a.key}
+                onPress={() => {
+                  a.onPress();
+                  onClose();
+                }}
+                style={({ pressed }: { pressed: boolean }) => [
+                  styles.row,
+                  i < actions.length - 1 && styles.rowDivider,
+                  pressed && { backgroundColor: 'rgba(255,255,255,0.06)' },
                 ]}>
-                {a.label}
-              </ThemedText>
-            </Pressable>
-          ))}
+                <Feather
+                  name={a.icon}
+                  size={18}
+                  color={a.destructive ? '#FF5C5C' : Brand.chatComposerIcon}
+                  style={styles.icon}
+                />
+                <ThemedText
+                  style={[
+                    styles.label,
+                    a.destructive && { color: '#FF5C5C' },
+                  ]}>
+                  {a.label}
+                </ThemedText>
+              </Pressable>
+            ))}
+          </View>
         </Pressable>
       </Pressable>
     </Modal>
@@ -128,9 +164,24 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 32,
   },
-  sheet: {
+  sheetWrap: {
     width: '100%',
     maxWidth: 320,
+    gap: 10,
+  },
+  strip: {
+    backgroundColor: '#272727',
+    borderRadius: 22,
+    overflow: 'hidden',
+    paddingHorizontal: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 16 },
+    shadowOpacity: 0.4,
+    shadowRadius: 24,
+    elevation: 12,
+  },
+  sheet: {
+    width: '100%',
     backgroundColor: '#272727',
     borderRadius: 18,
     overflow: 'hidden',
