@@ -34,7 +34,16 @@ export function VoicePlayer({ message, isMine }: Props) {
   const status = useAudioPlayerStatus(player);
 
   // Pause when the bubble unmounts so we don't leak background audio.
-  useEffect(() => () => player.pause(), [player]);
+  useEffect(
+    () => () => {
+      try {
+        player.pause();
+      } catch {
+        // player may already be releasing — ignore.
+      }
+    },
+    [player]
+  );
 
   const tint = isMine ? '#EDEDED' : Brand.chatHeaderTop;
   const playedTint = Brand.chatVoicePlayed;
