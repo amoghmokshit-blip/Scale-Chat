@@ -24,18 +24,21 @@ type Props = {
   visible: boolean;
   onClose: () => void;
   onPickCamera: () => void;
+  /** Gallery covers both photos AND videos (Tranche 2.C); the handler branches on the picked asset type. */
   onPickGallery: () => void;
+  /** Document picker (Tranche 2.C). */
+  onPickDocument: () => void;
 };
 
 /**
  * Attachment panel — Figma 1:3098.
  *
- * Slides up from the bottom over a dimmed backdrop. Layout is a 3-column grid
- * of tiles: Camera, Gallery, Document, Contact, Location. Only Camera and
- * Gallery are wired in this slice (Document/Contact/Location are visible but
- * disabled — the BRD will pick those up in future tickets).
+ * Slides up from the bottom over a dimmed backdrop. 3-column grid: Camera,
+ * Gallery (photos + videos), Document, Contact, Location. Camera / Gallery /
+ * Document are wired; Contact / Location are visible-but-disabled (future
+ * tranches 2.D).
  */
-export function AttachmentSheet({ visible, onClose, onPickCamera, onPickGallery }: Props) {
+export function AttachmentSheet({ visible, onClose, onPickCamera, onPickGallery, onPickDocument }: Props) {
   const tiles: Tile[] = [
     {
       key: 'camera',
@@ -62,7 +65,10 @@ export function AttachmentSheet({ visible, onClose, onPickCamera, onPickGallery 
       label: ChatCopy.attachments.document,
       tint: '#5BA3FF',
       icon: { lib: 'feather', name: 'file-text' },
-      disabled: true,
+      onPress: () => {
+        onPickDocument();
+        onClose();
+      },
     },
     {
       key: 'contact',

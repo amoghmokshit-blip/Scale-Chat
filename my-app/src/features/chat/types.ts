@@ -137,7 +137,31 @@ export type ImageMessage = MessageBase & {
   height: number;
 };
 
-export type Message = TextMessage | VoiceMessage | ImageMessage;
+export type DocumentMessage = MessageBase & {
+  type: 'document';
+  /** R2 public URL (or local `file://` while uploading). */
+  mediaUrl: string;
+  /** Original file name (≤255 chars; the repo truncates if longer). */
+  fileName: string;
+  /** File size in bytes — drives the size label. */
+  sizeBytes: number;
+  /** Exact MIME (drives the icon + open behaviour). */
+  mimeType: string;
+};
+
+export type VideoMessage = MessageBase & {
+  type: 'video';
+  /** R2 public URL (or local `file://` while uploading). */
+  mediaUrl: string;
+  /** Intrinsic pixel width — drives the bubble aspect box. */
+  width: number;
+  /** Intrinsic pixel height. */
+  height: number;
+  /** Duration in seconds. */
+  durationSec: number;
+};
+
+export type Message = TextMessage | VoiceMessage | ImageMessage | DocumentMessage | VideoMessage;
 
 export type SendMessageInput =
   | {
@@ -168,6 +192,35 @@ export type SendMessageInput =
       contentType?: string;
       /** Byte size if the picker reports it; otherwise the repo `stat`s the file. */
       sizeBytes?: number;
+      clientMessageId: string;
+      replyToMessageId?: string;
+    }
+  | {
+      threadId: string;
+      type: 'document';
+      /** Device-local file URI from `expo-document-picker`. */
+      uri: string;
+      fileName: string;
+      /** Required + positive (server rejects 0) — the picker supplies it. */
+      sizeBytes: number;
+      /** Validated against the DOCUMENT MIME allowlist before send. */
+      mimeType: string;
+      clientMessageId: string;
+      replyToMessageId?: string;
+    }
+  | {
+      threadId: string;
+      type: 'video';
+      /** Device-local file URI from `expo-image-picker` (`mediaTypes:['videos']`). */
+      uri: string;
+      width: number;
+      height: number;
+      /** Seconds (≥1; the picker gives ms, the screen converts with Math.max(1,…)). */
+      durationSec: number;
+      /** Validated against the VIDEO MIME allowlist before send. */
+      mimeType: string;
+      /** Required + positive — the picker supplies it. */
+      sizeBytes: number;
       clientMessageId: string;
       replyToMessageId?: string;
     };

@@ -127,6 +127,24 @@ function markPendingFailed(chatId: string, pendingId: string): void {
   }
 }
 
+/** Content fields to zero when a message becomes a tombstone — per kind, so a
+ *  deleted DOCUMENT/VIDEO doesn't leak its filename/dims (the bubbles also
+ *  early-return on `deletedAt`, but clearing is the defensive backstop). */
+function tombstoneContent(prev: Message): Partial<Message> {
+  switch (prev.type) {
+    case 'text':
+      return { text: '' };
+    case 'voice':
+      return { durationSec: 0, waveform: [] };
+    case 'document':
+      return { mediaUrl: '', fileName: '', sizeBytes: 0, mimeType: '' };
+    case 'video':
+      return { mediaUrl: '', width: 0, height: 0, durationSec: 0 };
+    default:
+      return { mediaUrl: '', width: 0, height: 0 };
+  }
+}
+
 // ─── DTO ↔ domain conversion ──────────────────────────────────────────────────
 // Pure conversion lives in `./dto-to-message.ts` so the unit tests can import
 // it without dragging in MMKV / socket.io / expo-constants. The re-export at
@@ -410,11 +428,7 @@ function ensureSocketWired(): void {
       ...prev,
       deletedAt: new Date().toISOString(),
       // Zero the content so leftover text/voice/image can't be rendered.
-      ...(prev.type === 'text'
-        ? { text: '' }
-        : prev.type === 'voice'
-          ? { durationSec: 0, waveform: [] }
-          : { mediaUrl: '', width: 0, height: 0 }),
+      ...tombstoneContent(prev),
     } as Message;
     notify();
   });
@@ -559,7 +573,7 @@ export const apiChatRepository: ChatRepository = {
     //    media we start in `uploading` and flip to `sending` once the R2 PUT
     //    completes. The id IS the clientMessageId so reconciliation by id
     //    Just Works when the durable row comes back.
-    const isMedia = input.type === 'image' || input.type === 'voice';
+    const isMedia = input.type !== 'text';
     const optimisticBase = {
       id: input.clientMessageId,
       threadId: input.threadId,
@@ -571,42 +585,76 @@ export const apiChatRepository: ChatRepository = {
       replyToMessageId: input.replyToMessageId ?? null,
       deletedAt: null,
     };
-    const optimistic: Message =
-      input.type === 'text'
-        ? { ...optimisticBase, type: 'text', text: input.text }
-        : input.type === 'voice'
-          ? {
-              ...optimisticBase,
-              type: 'voice',
-              durationSec: input.durationSec,
-              waveform: input.waveform,
-              mediaUrl: input.uri, // local preview
-            }
-          : {
-              ...optimisticBase,
-              type: 'image',
-              mediaUrl: input.uri, // local preview
-              width: input.width,
-              height: input.height,
-            };
+    let optimistic: Message;
+    if (input.type === 'text') {
+      optimistic = { ...optimisticBase, type: 'text', text: input.text };
+    } else if (input.type === 'voice') {
+      optimistic = {
+        ...optimisticBase,
+        type: 'voice',
+        durationSec: input.durationSec,
+        waveform: input.waveform,
+        mediaUrl: input.uri, // local preview
+      };
+    } else if (input.type === 'image') {
+      optimistic = {
+        ...optimisticBase,
+        type: 'image',
+        mediaUrl: input.uri, // local preview
+        width: input.width,
+        height: input.height,
+      };
+    } else if (input.type === 'document') {
+      optimistic = {
+        ...optimisticBase,
+        type: 'document',
+        mediaUrl: input.uri,
+        fileName: input.fileName,
+        sizeBytes: input.sizeBytes,
+        mimeType: input.mimeType,
+      };
+    } else {
+      optimistic = {
+        ...optimisticBase,
+        type: 'video',
+        mediaUrl: input.uri, // local preview while uploading
+        width: input.width,
+        height: input.height,
+        durationSec: input.durationSec,
+      };
+    }
     upsertMessage(input.threadId, optimistic);
     notify();
 
     // 2. For media: presign → PUT to R2 → flip optimistic row to `sending`.
+    //    DOCUMENT/VIDEO carry a validated MIME + positive size from the picker
+    //    (their server validators reject a 0 size / non-allowlisted MIME), so
+    //    they NEVER use the `fileSize(uri)` 0-stat fallback that IMAGE/VOICE do.
     let mediaObjectKey: string | undefined;
-    if (input.type === 'image' || input.type === 'voice') {
+    if (input.type !== 'text') {
       try {
         const contentType =
-          input.type === 'image' ? input.contentType ?? DEFAULT_IMAGE_CONTENT_TYPE : VOICE_CONTENT_TYPE;
-        const sizeBytes = input.type === 'image' && input.sizeBytes
-          ? input.sizeBytes
-          : await fileSize(input.uri);
+          input.type === 'image'
+            ? input.contentType ?? DEFAULT_IMAGE_CONTENT_TYPE
+            : input.type === 'voice'
+              ? VOICE_CONTENT_TYPE
+              : input.mimeType; // document + video
+        const sizeBytes =
+          input.type === 'image'
+            ? input.sizeBytes ?? (await fileSize(input.uri))
+            : input.type === 'voice'
+              ? await fileSize(input.uri)
+              : input.sizeBytes; // document + video — required + positive
+        const kind: MediaUploadKind =
+          input.type === 'image'
+            ? 'IMAGE'
+            : input.type === 'voice'
+              ? 'VOICE'
+              : input.type === 'document'
+                ? 'DOCUMENT'
+                : 'VIDEO';
 
-        const upload = await requestUploadUrl({
-          kind: input.type === 'image' ? 'IMAGE' : 'VOICE',
-          contentType,
-          sizeBytes,
-        });
+        const upload = await requestUploadUrl({ kind, contentType, sizeBytes });
         await putBytes(upload.uploadUrl, input.uri, contentType);
         mediaObjectKey = upload.objectKey;
 
@@ -627,31 +675,54 @@ export const apiChatRepository: ChatRepository = {
     }
 
     // 3. Compose the wire body for the send.
-    const body: SendMessageBody =
-      input.type === 'text'
-        ? {
-            clientMessageId: input.clientMessageId,
-            kind: 'TEXT',
-            text: input.text,
-            replyToMessageId: input.replyToMessageId,
-          }
-        : input.type === 'voice'
-          ? {
-              clientMessageId: input.clientMessageId,
-              kind: 'VOICE',
-              mediaObjectKey,
-              durationSec: input.durationSec,
-              waveform: input.waveform,
-              replyToMessageId: input.replyToMessageId,
-            }
-          : {
-              clientMessageId: input.clientMessageId,
-              kind: 'IMAGE',
-              mediaObjectKey,
-              imageWidth: input.width,
-              imageHeight: input.height,
-              replyToMessageId: input.replyToMessageId,
-            };
+    let body: SendMessageBody;
+    if (input.type === 'text') {
+      body = {
+        clientMessageId: input.clientMessageId,
+        kind: 'TEXT',
+        text: input.text,
+        replyToMessageId: input.replyToMessageId,
+      };
+    } else if (input.type === 'voice') {
+      body = {
+        clientMessageId: input.clientMessageId,
+        kind: 'VOICE',
+        mediaObjectKey,
+        durationSec: input.durationSec,
+        waveform: input.waveform,
+        replyToMessageId: input.replyToMessageId,
+      };
+    } else if (input.type === 'image') {
+      body = {
+        clientMessageId: input.clientMessageId,
+        kind: 'IMAGE',
+        mediaObjectKey,
+        imageWidth: input.width,
+        imageHeight: input.height,
+        replyToMessageId: input.replyToMessageId,
+      };
+    } else if (input.type === 'document') {
+      body = {
+        clientMessageId: input.clientMessageId,
+        kind: 'DOCUMENT',
+        mediaObjectKey,
+        mediaMimeType: input.mimeType,
+        documentTitle: input.fileName,
+        documentSizeBytes: input.sizeBytes,
+        replyToMessageId: input.replyToMessageId,
+      };
+    } else {
+      body = {
+        clientMessageId: input.clientMessageId,
+        kind: 'VIDEO',
+        mediaObjectKey,
+        mediaMimeType: input.mimeType,
+        videoDurationSec: input.durationSec,
+        videoWidth: input.width,
+        videoHeight: input.height,
+        replyToMessageId: input.replyToMessageId,
+      };
+    }
 
     // 4. Prefer the socket path (real-time + same advisory-locked sequence on the
     //    server). Fall back to REST so a degraded socket never blocks sends.
@@ -700,11 +771,7 @@ export const apiChatRepository: ChatRepository = {
         cache.messages[at] = {
           ...prev,
           deletedAt: new Date().toISOString(),
-          ...(prev.type === 'text'
-            ? { text: '' }
-            : prev.type === 'voice'
-              ? { durationSec: 0, waveform: [] }
-              : { mediaUrl: '', width: 0, height: 0 }),
+          ...tombstoneContent(prev),
         } as Message;
         notify();
       }

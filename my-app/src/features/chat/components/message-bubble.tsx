@@ -7,8 +7,10 @@ import { formatBubbleTime, formatDuration } from '@/lib/format-time';
 
 import { ChatCopy } from '../copy';
 import type { Message } from '../types';
+import { DocumentBubble } from './document-bubble';
 import { ImageBubble } from './image-bubble';
 import { ReactionsPillRow } from './reactions-pill-row';
+import { VideoBubble } from './video-bubble';
 import { VoicePlayer } from './voice-player';
 
 type Props = {
@@ -62,10 +64,11 @@ export function MessageBubble({
   // advertise a pin).
   const isPinned = message.pinnedAt != null && !isTombstone;
 
-  // Image bubbles render the image as the entire bubble surface — no rounded
-  // chat-bubble background underneath, no reply quote inside (we render the
-  // quote inline above the image for IMAGE messages to keep the layout clean).
-  if (message.type === 'image' && !isTombstone) {
+  // Image + video bubbles render the media as the entire bubble surface — no
+  // rounded chat-bubble background underneath; the reply quote renders inline
+  // above the media to keep the layout clean. (Video reuses this branch's
+  // chrome; the tile itself is `VideoBubble`.)
+  if ((message.type === 'image' || message.type === 'video') && !isTombstone) {
     return (
       <View style={[styles.outer, { alignItems: isMine ? 'flex-end' : 'flex-start' }]}>
         {message.forwardedFromMessageId ? <ForwardedLabel color="#979797" /> : null}
@@ -83,7 +86,11 @@ export function MessageBubble({
             </ThemedText>
           </View>
         ) : null}
-        <ImageBubble message={message} isMine={isMine} onLongPress={onLongPress as never} />
+        {message.type === 'video' ? (
+          <VideoBubble message={message} isMine={isMine} onLongPress={onLongPress as never} />
+        ) : (
+          <ImageBubble message={message} isMine={isMine} onLongPress={onLongPress as never} />
+        )}
         <View
           style={[
             styles.metaRow,
@@ -175,6 +182,8 @@ export function MessageBubble({
           <ThemedText style={[styles.text, { color }]}>{message.text}</ThemedText>
         ) : message.type === 'voice' ? (
           <VoicePlayer message={message} isMine={isMine} />
+        ) : message.type === 'document' ? (
+          <DocumentBubble message={message} isMine={isMine} />
         ) : null}
       </Pressable>
       <View
@@ -224,6 +233,12 @@ function replyPreview(replyTarget: Message): string {
   if (replyTarget.type === 'text') return replyTarget.text;
   if (replyTarget.type === 'voice') {
     return `🎤 Voice note · ${formatDuration(replyTarget.durationSec)}`;
+  }
+  if (replyTarget.type === 'document') {
+    return `📄 ${replyTarget.fileName || ChatCopy.media.documentLabel}`;
+  }
+  if (replyTarget.type === 'video') {
+    return `📹 ${ChatCopy.media.videoLabel}`;
   }
   return '📷 Photo';
 }

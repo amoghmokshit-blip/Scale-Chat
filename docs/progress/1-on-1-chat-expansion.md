@@ -140,7 +140,7 @@ These items are an executable checklist — when the gating tranche begins, the 
 | **2.E** | Forward + Pin (+ ~~Message Info~~ deferred) | **Split by layer, then front re-split — all shipped.** 2.E-back ✅, 2.E-front-forward ✅, 2.E-front-pin (Pin/Unpin rows + optimistic + socket + bubble pip) ✅ — all **LANDED 2026-05-25**. Pinned strip + Message-Info deferred. **Tranche 2.E COMPLETE.** | ✅ | ✅ | — | 2.B |
 | **2.H** | Calls signalling (server) | `CallSession` table + 100ms-or-LiveKit-Cloud client + ring/accept/decline/hangup REST + webhook + **`user:{userId}` socket room** + **BullMQ ring-timeout** | ✅ | none | C | 2.B + POC complete |
 | **2.I** | Call UI + push wakeup + **EAS migration** | `UserDevice` table + push module + CallScreen + IncomingCallScreen + provider SDK install + **first tranche to require EAS Build** (push wakeup + calls can't be tested on emulator alone) | ✅ | ✅ | D | 2.H + EAS + Apple Dev account |
-| **2.C** | Document + Video kinds | wire AttachSheet tiles + bubble renderers + composer camera-shortcut | (extends 2.B) | ✅ | — | 2.B |
+| **2.C** | Document + Video kinds | ✅ **LANDED 2026-05-25**. Combined Gallery (photos+videos) + Document picker + DocumentBubble + VideoBubble + full-screen VideoViewer; client `validateMediaPick` guard; first native-dep prebuild (expo-document-picker + expo-video). +2 VIDEO e2e (33 green), +18 mobile tests (71). | ✅ (extends 2.B) | ✅ | — | 2.B |
 | **2.D** | Location + Contact-card kinds | static-map bubble + vCard-style bubble + map picker | (extends 2.B) | ✅ | — | 2.B |
 | **2.F** | Polls (1-on-1) | PollMessage/PollOption/PollVote tables + module + bubble + composer | ✅ | ✅ | B | 2.B |
 | ~~**2.G**~~ | ~~Scheduled-send~~ | **Deferred to v1.1 BRD per R2.** | — | — | — | — |
@@ -318,50 +318,41 @@ Extend the `prisma.message.create` data block at lines 394-410 to persist per-ki
 
 ---
 
-## Tranche 2.C — Document + Video message kinds
+## Tranche 2.C — Document + Video message kinds — ✅ LANDED 2026-05-25
 
-Builds on 2.B's foundation. Wires the existing-but-disabled Documents tile + adds Video via the composer camera-shortcut.
+Builds on 2.B's foundation. **First tranche to add new native deps** (`expo-document-picker` + `expo-video`) — so it required a prebuild + dev-client rebuild (the gate). Reshaped by a 5-agent review (the plan below supersedes the original C.1–C.7 sketch). **QA'd on the Android emulator** (mock mode, rebuilt client): attach sheet → Document tile enabled + picker opens; both bubbles render correctly (DocumentBubble icon+name+size; VideoBubble aspect tile + play + duration pill); coexists with forwarded label / pin pip / reactions; chat-list shows "📹 Video".
 
-### Status table
+### Status table (as shipped)
 
 | Sub-item | Frontend | Backend | Notes |
 |---|---|---|---|
-| **C.1** Composer camera-shortcut icon | 🚫 | n/a | Feather "camera", between paperclip and mic; one-tap `launchCameraAsync` |
-| **C.2** AttachSheet — Documents tile wired | 🚫 | n/a | Remove `disabled` from `attachment-sheet.tsx:65`; add `onPickDocument` handler |
-| **C.3** `expo-document-picker` integration | 🚫 | n/a | `getDocumentAsync` → presign → send DOCUMENT |
-| **C.4** Document bubble renderer | 🚫 | n/a | `bubbles/document-bubble.tsx` — icon + title + size pill |
-| **C.5** Video bubble renderer | 🚫 | n/a | `bubbles/video-bubble.tsx` — thumbnail + play overlay + duration pill |
-| **C.6** Full-screen video player | 🚫 | n/a | `bubbles/video-player-overlay.tsx` — `expo-video.VideoView` |
-| **C.7** Document download + share | 🚫 | n/a | `expo-file-system.downloadAsync` → `expo-sharing.shareAsync` |
+| ~~**C.1** Composer camera-shortcut~~ | ✂️ CUT | n/a | Replaced by ONE combined **Gallery** tile (`mediaTypes:['images','videos']`) branching on `asset.type` — less sheet crowding than a separate video entry. |
+| **C.2** AttachSheet — Document tile wired | ✅ | n/a | `disabled` removed; `onPickDocument` prop. Gallery now covers photos + videos. |
+| **C.3** `expo-document-picker` integration | ✅ | n/a | `getDocumentAsync` (v56 `{canceled, assets:[{uri,name,size,mimeType}]}`) → **`validateMediaPick` guard** (mime allowlist + size>0 + ≤cap, mime-from-ext fallback, filename ≤255) → presign → send DOCUMENT. |
+| **C.4** DocumentBubble | ✅ | n/a | `document-bubble.tsx` — `file-text` icon + name + `formatFileSize`; rendered INSIDE the standard bubble (type-dispatch, like VoicePlayer) so it inherits reply/forward/pin/reaction chrome. Tap → `expo-web-browser` (already a dep), gated on durable status. |
+| **C.5** VideoBubble | ✅ | n/a | `video-bubble.tsx` — folded into the IMAGE early-return; polished tile (aspect box + play button + duration pill), **no list-mounted player**. Video picking reuses installed `expo-image-picker` (no new dep). |
+| **C.6** Full-screen video player | ✅ | n/a | `video-viewer.tsx` — `expo-video` `useVideoPlayer`/`VideoView`, mounted ONLY while open (no N-players-in-FlatList), pause-before-close teardown. |
+| ~~**C.7** Document download + share~~ | ⏸ DEFERRED | n/a | v1 opens via `expo-web-browser` (in-app browser, no new dep). `expo-sharing`/download deferred. **Real video poster frames** also deferred (needs a backend thumbnail object; on-device remote-URL extraction is unreliable). |
 
-### Files touched
-
-**Frontend (`my-app/`)**
-
-- `src/features/chat/components/composer.tsx` — EDIT. Insert camera icon between scan and mic in `endActions` (lines 125-132). New prop `onPickCameraShortcut`.
-- `src/features/chat/components/attachment-sheet.tsx` — EDIT. Remove `disabled: true` from Documents tile (line 65). Add `onPickDocument` prop.
-- `src/features/chat/components/bubbles/document-bubble.tsx` — NEW.
-- `src/features/chat/components/bubbles/video-bubble.tsx` — NEW.
-- `src/features/chat/components/bubbles/video-player-overlay.tsx` — NEW.
-- `src/features/chat/components/message-bubble.tsx` — EDIT. Add DOCUMENT + VIDEO cases to the dispatch switch.
-- `src/features/chat/data/dto-to-message.ts` — EDIT. Add DOCUMENT + VIDEO mappers.
-- `src/features/chat/data/chat-repository.ts` — EDIT. Add `sendDocument(...)` and `sendVideo(...)` methods.
-- `src/features/chat/data/api-chat-repository.ts` — EDIT. Implement the above; presign → upload → POST message.
-- `src/app/chat/[id].tsx` — EDIT. `handleCameraShortcut`, `handlePickDocument` handlers.
-
-### Dependencies to install
+### Native deps (the gate)
 
 ```bash
-npm --workspace=my-app install expo-document-picker expo-file-system expo-sharing expo-video-thumbnails expo-video
+# from repo ROOT (K11), then prebuild:android + dev:android
+npm install expo-document-picker expo-video expo-build-properties
 ```
-
-All have Expo config plugins; Expo Go compatible.
+- `expo-document-picker` + `expo-video` = the two new native modules; `expo-build-properties` is a config-only plugin (reserved for 2.H WebRTC heap — no 2.C config needed). **No `expo-video-thumbnails`, no `expo-sharing`.**
+- **MultiDex (K1) was moot**: RN 0.85 / SDK 56 `minSdkVersion` 24 → MultiDex auto-on (≥21). The prebuild + first `expo run:android` succeeded on Windows; dev client booted with the new modules (Step-0 gate passed). The K11 expo-router de-hoist is now durably fixed by the root `postinstall` junction script.
 
 ### E2e tests added
 
-- `send DOCUMENT exceeds 100MB returns 413`
-- `send VIDEO exceeds 80MB returns 413`
-- `download URL on read echoes mediaUrl for DOCUMENT`
+- `send VIDEO persists dims + duration and round-trips` (happy path)
+- `send VIDEO missing videoWidth → 400` (validator)
+
+(33 e2e green. The original 413/echo sketch was dropped — the server enforces size at the `/media/upload-url` step, not on send.)
+
+### Helpers / Jest
+
+- `lib/media-pick.ts` (`validateMediaPick` + `resolveMime` + `truncateFileName`) + `lib/format-size.ts` (`formatFileSize`) — pure, Jest-tested (allowlist/cap injected by the caller so the Jest graph never value-imports `@scalechat/shared`). 71 mobile tests green (+18).
 
 ---
 

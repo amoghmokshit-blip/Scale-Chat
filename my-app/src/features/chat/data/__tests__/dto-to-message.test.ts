@@ -173,6 +173,49 @@ describe('dtoToMessage — forward / pin metadata (Tranche 2.E)', () => {
   });
 });
 
+describe('dtoToMessage — DOCUMENT + VIDEO (Tranche 2.C)', () => {
+  it('maps a DOCUMENT message', () => {
+    const dto = makeDto({
+      kind: 'DOCUMENT',
+      text: null,
+      mediaUrl: 'https://cdn.example.com/chat-media/abcd1234/x.pdf',
+      mediaMimeType: 'application/pdf',
+      documentTitle: 'Q3 report.pdf',
+      documentSizeBytes: 248_000,
+    });
+    const m = dtoToMessage(dto, COUNTERPART_ID) as Extract<ReturnType<typeof dtoToMessage>, { type: 'document' }>;
+    expect(m.type).toBe('document');
+    expect(m.fileName).toBe('Q3 report.pdf');
+    expect(m.sizeBytes).toBe(248_000);
+    expect(m.mimeType).toBe('application/pdf');
+    expect(m.mediaUrl).toBe('https://cdn.example.com/chat-media/abcd1234/x.pdf');
+  });
+
+  it('maps a VIDEO message with dims + duration', () => {
+    const dto = makeDto({
+      kind: 'VIDEO',
+      text: null,
+      mediaUrl: 'https://cdn.example.com/chat-media/abcd1234/v.mp4',
+      mediaMimeType: 'video/mp4',
+      videoWidth: 1080,
+      videoHeight: 1920,
+      videoDurationSec: 42,
+    });
+    const m = dtoToMessage(dto, COUNTERPART_ID) as Extract<ReturnType<typeof dtoToMessage>, { type: 'video' }>;
+    expect(m.type).toBe('video');
+    expect(m.width).toBe(1080);
+    expect(m.height).toBe(1920);
+    expect(m.durationSec).toBe(42);
+  });
+
+  it('falls back to a 16:9 box (not 0) when a VIDEO row omits dims', () => {
+    const dto = makeDto({ kind: 'VIDEO', text: null, videoWidth: null, videoHeight: null });
+    const m = dtoToMessage(dto, COUNTERPART_ID) as Extract<ReturnType<typeof dtoToMessage>, { type: 'video' }>;
+    expect(m.width).toBe(16);
+    expect(m.height).toBe(9);
+  });
+});
+
 describe('dtoToMessage — senderId resolution', () => {
   it("returns 'me' when senderUserId !== counterpartId regardless of which 'me' actually is", () => {
     // The repo resolves any non-counterpart sender to 'me'. This is a deliberate

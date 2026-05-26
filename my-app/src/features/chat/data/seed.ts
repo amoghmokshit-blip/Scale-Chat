@@ -62,6 +62,14 @@ export const SEED_MESSAGES: Record<string, Message[]> = {
       // Seeded pinned message (Tranche 2.E-front-pin) so the bubble pin pip
       // shows on a fresh mock load — counterpart side (leading pip).
       type: 'text', text: 'Done !', pinnedAt: minutesAgo(2) },
+    // Seeded DOCUMENT + VIDEO (Tranche 2.C) so both bubbles render on a fresh
+    // mock load. URLs are stable public sample assets so tap-to-open / play work.
+    { id: 'm10', threadId: 't-naman', senderId: 'c-naman', sequence: 10, createdAt: minutesAgo(2), status: 'read',
+      type: 'document', fileName: 'Trip itinerary.pdf', sizeBytes: 248_000, mimeType: 'application/pdf',
+      mediaUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf' },
+    { id: 'm11', threadId: 't-naman', senderId: 'me', sequence: 11, createdAt: minutesAgo(1), status: 'delivered',
+      type: 'video', width: 1280, height: 720, durationSec: 15,
+      mediaUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4' },
   ],
   't-megha': [
     { id: 'm1', threadId: 't-megha', senderId: 'c-megha', sequence: 1, createdAt: hoursAgo(2), status: 'read',

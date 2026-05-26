@@ -51,5 +51,27 @@ export function dtoToMessage(m: MessageDto, counterpartId: string): Message {
       height: m.imageHeight ?? 0,
     };
   }
+  if (m.kind === 'DOCUMENT') {
+    return {
+      ...base,
+      type: 'document',
+      mediaUrl: m.mediaUrl ?? '',
+      fileName: m.documentTitle ?? 'Document',
+      sizeBytes: m.documentSizeBytes ?? 0,
+      mimeType: m.mediaMimeType ?? 'application/octet-stream',
+    };
+  }
+  if (m.kind === 'VIDEO') {
+    return {
+      ...base,
+      type: 'video',
+      mediaUrl: m.mediaUrl ?? '',
+      // Fallback to a 16:9 box (not 0) so a malformed/replayed row without dims
+      // doesn't collapse the bubble to zero height.
+      width: m.videoWidth ?? 16,
+      height: m.videoHeight ?? 9,
+      durationSec: m.videoDurationSec ?? 0,
+    };
+  }
   return { ...base, type: 'text', text: m.text ?? '' };
 }

@@ -1,3 +1,4 @@
+import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
@@ -31,12 +32,19 @@ import { MutePickerSheet } from '@/features/chat/components/mute-picker-sheet';
 import { PerChatOptionsSheet } from '@/features/chat/components/per-chat-options-sheet';
 import { VoiceRecorderOverlay } from '@/features/chat/components/voice-recorder-overlay';
 import { ChatCopy } from '@/features/chat/copy';
-import { MAX_PINNED_PER_CHAT } from '@scalechat/shared';
+import {
+  DOCUMENT_CONTENT_TYPES,
+  DOCUMENT_MAX_BYTES,
+  MAX_PINNED_PER_CHAT,
+  VIDEO_CONTENT_TYPES,
+  VIDEO_MAX_BYTES,
+} from '@scalechat/shared';
 
 import { useThread } from '@/features/chat/hooks/use-thread';
 import { chatRepository } from '@/features/chat/data';
 import { ApiError } from '@/lib/api-client';
 import { formatDayLabel } from '@/lib/format-time';
+import { truncateFileName, validateMediaPick } from '@/lib/media-pick';
 
 import type { Message } from '@/features/chat/types';
 
@@ -73,6 +81,8 @@ export default function ChatThreadScreen() {
     send,
     sendImage,
     sendVoice,
+    sendDocument,
+    sendVideo,
     loading,
     loadOlder,
     loadingOlder,
@@ -309,19 +319,68 @@ export default function ChatThreadScreen() {
             exif: false,
           })
         : await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ['images'],
+            // Gallery covers photos AND videos (Tranche 2.C); branch on asset.type below.
+            mediaTypes: ['images', 'videos'],
             quality: 0.85,
             exif: false,
           });
     if (result.canceled) return;
     const asset = result.assets[0];
     if (!asset || !asset.uri) return;
+
+    if (asset.type === 'video') {
+      const check = validateMediaPick(
+        { uri: asset.uri, mimeType: asset.mimeType, fileName: asset.fileName, sizeBytes: asset.fileSize },
+        { allowedMimes: VIDEO_CONTENT_TYPES, maxBytes: VIDEO_MAX_BYTES },
+      );
+      if (!check.ok) {
+        Alert.alert(ChatCopy.media.cantSendTitle, mediaRejectBody(check.reason, VIDEO_MAX_BYTES));
+        return;
+      }
+      await sendVideo({
+        uri: asset.uri,
+        width: asset.width ?? 0,
+        height: asset.height ?? 0,
+        // expo-image-picker reports duration in ms; clamp to ≥1s (server requires positive).
+        durationSec: Math.max(1, Math.round((asset.duration ?? 0) / 1000)),
+        mimeType: check.mimeType,
+        sizeBytes: check.sizeBytes,
+      });
+      return;
+    }
+
     await sendImage({
       uri: asset.uri,
       width: asset.width ?? 0,
       height: asset.height ?? 0,
       contentType: asset.mimeType,
       sizeBytes: asset.fileSize,
+    });
+  }
+
+  async function handlePickDocument() {
+    const result = await DocumentPicker.getDocumentAsync({
+      type: [...DOCUMENT_CONTENT_TYPES],
+      copyToCacheDirectory: true,
+      multiple: false,
+    });
+    if (result.canceled) return;
+    const asset = result.assets[0];
+    if (!asset || !asset.uri) return;
+    const check = validateMediaPick(
+      { uri: asset.uri, mimeType: asset.mimeType, fileName: asset.name, sizeBytes: asset.size },
+      { allowedMimes: DOCUMENT_CONTENT_TYPES, maxBytes: DOCUMENT_MAX_BYTES },
+    );
+    if (!check.ok) {
+      Alert.alert(ChatCopy.media.cantSendTitle, mediaRejectBody(check.reason, DOCUMENT_MAX_BYTES));
+      return;
+    }
+    await sendDocument({
+      uri: asset.uri,
+      // Server caps documentTitle at 255 — truncate (preserving extension) to avoid a 400.
+      fileName: truncateFileName(asset.name ?? 'document'),
+      sizeBytes: check.sizeBytes,
+      mimeType: check.mimeType,
     });
   }
 
@@ -436,6 +495,7 @@ export default function ChatThreadScreen() {
         onClose={() => setAttachOpen(false)}
         onPickCamera={() => void handlePickImage('camera')}
         onPickGallery={() => void handlePickImage('gallery')}
+        onPickDocument={() => void handlePickDocument()}
       />
 
       <VoiceRecorderOverlay
@@ -561,6 +621,13 @@ export default function ChatThreadScreen() {
   );
 }
 
+
+/** Friendly Alert body for a rejected media pick (Tranche 2.C guard). */
+function mediaRejectBody(reason: 'unsupported_type' | 'empty' | 'too_large', maxBytes: number): string {
+  if (reason === 'too_large') return ChatCopy.media.tooLarge(Math.round(maxBytes / (1024 * 1024)));
+  if (reason === 'empty') return ChatCopy.media.empty;
+  return ChatCopy.media.unsupportedType;
+}
 
 function groupForRender(messages: Message[], byId: Map<string, Message>): ListItem[] {
   const out: ListItem[] = [];

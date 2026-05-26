@@ -72,6 +72,20 @@ export const ChatCopy = {
     location: 'Location',
   },
 
+  /** Document + Video kinds (Tranche 2.C). */
+  media: {
+    /** Title for a rejected-pick Alert. */
+    cantSendTitle: 'Unable to send file',
+    tooLarge: (maxMb: number) => `That file is too large. The limit is ${maxMb} MB.`,
+    unsupportedType: 'That file type is not supported.',
+    empty: 'That file appears to be empty.',
+    /** Bubble fallback label when a document has no name. */
+    documentFallbackName: 'Document',
+    /** Reply-quote + chat-list preview labels. */
+    videoLabel: 'Video',
+    documentLabel: 'Document',
+  },
+
   recorder: {
     recording: 'Recording…',
     holdToRecord: 'Tap send to share when ready',

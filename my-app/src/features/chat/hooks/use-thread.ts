@@ -45,6 +45,26 @@ export type SendVoiceInput = {
   waveform: number[];
 };
 
+export type SendDocumentInput = {
+  /** Device-local file URI from `expo-document-picker`. */
+  uri: string;
+  fileName: string;
+  /** Positive byte size (the server rejects 0); validated before this call. */
+  sizeBytes: number;
+  /** Allowlisted MIME (validated before this call). */
+  mimeType: string;
+};
+
+export type SendVideoInput = {
+  /** Device-local file URI from `expo-image-picker` video pick. */
+  uri: string;
+  width: number;
+  height: number;
+  durationSec: number;
+  mimeType: string;
+  sizeBytes: number;
+};
+
 export function useThread(threadId: string | undefined): {
   thread: Thread | null;
   messages: Message[];
@@ -54,6 +74,8 @@ export function useThread(threadId: string | undefined): {
   send: (text: string) => Promise<void>;
   sendImage: (input: SendImageInput) => Promise<void>;
   sendVoice: (input: SendVoiceInput) => Promise<void>;
+  sendDocument: (input: SendDocumentInput) => Promise<void>;
+  sendVideo: (input: SendVideoInput) => Promise<void>;
   loadOlder: () => Promise<void>;
   /** Set the reply target; pass null to clear. */
   replyTo: (message: Message | null) => void;
@@ -229,6 +251,54 @@ export function useThread(threadId: string | undefined): {
     [threadId, replyingTo]
   );
 
+  const sendDocument = useCallback(
+    async (input: SendDocumentInput) => {
+      if (!threadId) return;
+      const replyId = replyingTo?.id;
+      setReplyingTo(null);
+      try {
+        await chatRepository.sendMessage({
+          threadId,
+          type: 'document',
+          uri: input.uri,
+          fileName: input.fileName,
+          sizeBytes: input.sizeBytes,
+          mimeType: input.mimeType,
+          clientMessageId: newClientMessageId(),
+          replyToMessageId: replyId,
+        });
+      } catch {
+        // Repo already flipped the optimistic row to `failed`.
+      }
+    },
+    [threadId, replyingTo]
+  );
+
+  const sendVideo = useCallback(
+    async (input: SendVideoInput) => {
+      if (!threadId) return;
+      const replyId = replyingTo?.id;
+      setReplyingTo(null);
+      try {
+        await chatRepository.sendMessage({
+          threadId,
+          type: 'video',
+          uri: input.uri,
+          width: input.width,
+          height: input.height,
+          durationSec: input.durationSec,
+          mimeType: input.mimeType,
+          sizeBytes: input.sizeBytes,
+          clientMessageId: newClientMessageId(),
+          replyToMessageId: replyId,
+        });
+      } catch {
+        // Repo already flipped the optimistic row to `failed`.
+      }
+    },
+    [threadId, replyingTo]
+  );
+
   // ─── Load older ────────────────────────────────────────────────────────────
   const loadOlder = useCallback(async () => {
     if (!threadId || loadingOlder || !hasMoreOlder) return;
@@ -289,6 +359,8 @@ export function useThread(threadId: string | undefined): {
     send,
     sendImage,
     sendVoice,
+    sendDocument,
+    sendVideo,
     loadOlder,
     replyTo,
     replyingTo,

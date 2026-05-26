@@ -101,6 +101,8 @@ function previewText(thread: Thread): string {
     const secs = (m.durationSec % 60).toString().padStart(2, '0');
     return `Voice note · ${mins}:${secs}`;
   }
+  if (m.type === 'document') return `📄 ${m.fileName || 'Document'}`;
+  if (m.type === 'video') return '📹 Video';
   return '';
 }
 

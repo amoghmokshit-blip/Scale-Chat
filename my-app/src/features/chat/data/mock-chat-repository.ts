@@ -141,25 +141,39 @@ export const mockChatRepository: ChatRepository = {
       createdAt: new Date().toISOString(),
       status: 'sent' as const,
     };
-    const msg: Message =
-      input.type === 'text'
-        ? { ...base, type: 'text', text: input.text }
-        : input.type === 'voice'
-          ? {
-              ...base,
-              type: 'voice',
-              durationSec: input.durationSec,
-              waveform: input.waveform,
-              // Mock keeps the local file URI so the player works offline.
-              mediaUrl: input.uri,
-            }
-          : {
-              ...base,
-              type: 'image',
-              mediaUrl: input.uri,
-              width: input.width,
-              height: input.height,
-            };
+    let msg: Message;
+    if (input.type === 'text') {
+      msg = { ...base, type: 'text', text: input.text };
+    } else if (input.type === 'voice') {
+      msg = {
+        ...base,
+        type: 'voice',
+        durationSec: input.durationSec,
+        waveform: input.waveform,
+        // Mock keeps the local file URI so the player works offline.
+        mediaUrl: input.uri,
+      };
+    } else if (input.type === 'image') {
+      msg = { ...base, type: 'image', mediaUrl: input.uri, width: input.width, height: input.height };
+    } else if (input.type === 'document') {
+      msg = {
+        ...base,
+        type: 'document',
+        mediaUrl: input.uri,
+        fileName: input.fileName,
+        sizeBytes: input.sizeBytes,
+        mimeType: input.mimeType,
+      };
+    } else {
+      msg = {
+        ...base,
+        type: 'video',
+        mediaUrl: input.uri,
+        width: input.width,
+        height: input.height,
+        durationSec: input.durationSec,
+      };
+    }
 
     const list = s.messagesByThread[input.threadId] ?? [];
     s.messagesByThread = {
@@ -190,7 +204,11 @@ export const mockChatRepository: ChatRepository = {
         ? { text: '' }
         : prev.type === 'voice'
           ? { durationSec: 0, waveform: [] }
-          : { mediaUrl: '', width: 0, height: 0 }),
+          : prev.type === 'document'
+            ? { mediaUrl: '', fileName: '', sizeBytes: 0, mimeType: '' }
+            : prev.type === 'video'
+              ? { mediaUrl: '', width: 0, height: 0, durationSec: 0 }
+              : { mediaUrl: '', width: 0, height: 0 }),
     } as Message;
     s.messagesByThread[threadId] = [...list.slice(0, at), tombstone, ...list.slice(at + 1)];
     persist();

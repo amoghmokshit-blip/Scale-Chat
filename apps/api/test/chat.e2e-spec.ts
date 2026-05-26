@@ -443,6 +443,48 @@ describe('1-on-1 chat (REST happy path)', () => {
     expect(res.statusCode).toBe(400);
   });
 
+  it('send VIDEO persists dims + duration and round-trips', async () => {
+    const chatId = await oneOnOne();
+    const res = await authedInject(testApp, {
+      method: 'POST',
+      url: `/chats/${chatId}/messages`,
+      token: alice.accessToken,
+      payload: {
+        kind: 'VIDEO',
+        clientMessageId: cli(),
+        mediaObjectKey: docKey(alice.id, 'mp4'),
+        mediaMimeType: 'video/mp4',
+        videoDurationSec: 15,
+        videoWidth: 1280,
+        videoHeight: 720,
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const dto = res.json<{ kind: string; videoDurationSec: number; videoWidth: number; videoHeight: number }>();
+    expect(dto.kind).toBe('VIDEO');
+    expect(dto.videoDurationSec).toBe(15);
+    expect(dto.videoWidth).toBe(1280);
+    expect(dto.videoHeight).toBe(720);
+  });
+
+  it('send VIDEO missing videoWidth → 400', async () => {
+    const chatId = await oneOnOne();
+    const res = await authedInject(testApp, {
+      method: 'POST',
+      url: `/chats/${chatId}/messages`,
+      token: alice.accessToken,
+      payload: {
+        kind: 'VIDEO',
+        clientMessageId: cli(),
+        mediaObjectKey: docKey(alice.id, 'mp4'),
+        mediaMimeType: 'video/mp4',
+        videoDurationSec: 15,
+        videoHeight: 720,
+      },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
   it('send LOCATION persists lat/lng; out-of-range latitude → 400', async () => {
     const chatId = await oneOnOne();
     const ok = await authedInject(testApp, {
