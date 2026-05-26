@@ -524,12 +524,12 @@ Read-only derivation from existing rows (`ChatMember.lastReadSequence` for read 
 |---|---|---|---|
 | **F.1** Migration B — Poll tables | n/a | ✅ (2026-05-26, PR-1) | `PollMessage` + `PollOption` + `PollVote`. Migration `20260527000000_add_polls`. Natural-key uniqueness `(poll_message_id, voter_user_id, poll_option_id)` for idempotent retries. |
 | **F.2** `PollsModule` | n/a | ✅ (2026-05-26, PR-1) | `POST /chats/:chatId/polls`, `POST /messages/:id/vote`, `GET /messages/:id/poll`, `POST /messages/:id/poll/close`. Vote runs single-select replace OR multi-select diff under `pg_advisory_xact_lock(pollMessageId)`. New `MessagesService.createServerAuthored(tx, …)` (reused by 2.H for CALL_EVENT) authors POLL rows without hitting the `SERVER_ONLY_KINDS` reject. `MessageDto.poll: PollAggregate \| null` folded in via batched `injectPolls` on `list`. |
-| **F.3** AttachSheet — Poll tile added | 🚫 (PR-2) | n/a | New tile in tiles array |
-| **F.4** PollComposerScreen | 🚫 (PR-2) | n/a | Question + 2-4 options + multi-select toggle (anonymous hidden in 1-on-1) |
-| **F.5** PollBubble | 🚫 (PR-2) | n/a | Question + per-option radio/checkbox + count + fill bar |
-| **F.6** Optimistic vote + revote | 🚫 (PR-2) | n/a | Mutate cached aggregate; reconcile on `poll:voted` socket |
-| **F.7** Socket event `poll:voted` | n/a | ✅ (2026-05-26, PR-1) | Personalised per viewer (server iterates chat members; `options[].votedByMe` is per-recipient). Emitted on create, vote, and close. Delivered via the new per-user `user:{userId}` room (joined on connect; reused by 2.H call-ring). |
-| **F.8** Close-poll affordance (sender-only) | 🚫 (PR-2) | n/a | "Close poll" row in MessageActionSheet on own POLL bubble |
+| **F.3** AttachSheet — Poll tile added | ✅ (2026-05-26, PR-2) | n/a | 6th tile (`bar-chart-2`, tint `#FFC857`); wired in `chat/[id].tsx` → `router.push('/chat/compose-poll')` |
+| **F.4** PollComposerScreen | ✅ (2026-05-26, PR-2) | n/a | `chat/compose-poll.tsx` modal-sibling route (registered in `chat/_layout.tsx` with `presentation: 'modal'`). Question (≤300) + 2–10 dynamic option inputs + multi-select Switch (default OFF, BRD Q4). Anonymous hidden in 1-on-1. Trim + case-insensitive duplicate check before submit. |
+| **F.5** PollBubble | ✅ (2026-05-26, PR-2) | n/a | Question + radio (single-select) / checkbox (multi-select) per option + count badge + horizontal fill bar (proportional to maxCount, lime/purple per side) + "N voted" / "Poll closed" subline. Disabled when `closedAt != null`. Rendered inside the standard bubble (inherits reply/forward/pin chrome + reactions pill row). |
+| **F.6** Optimistic vote + revote | ✅ (2026-05-26, PR-2) | n/a | New pure `applyVoteLocally` helper (`data/poll-vote-math.ts`) mirrors the server's single-replace vs multi-diff math. Cache flips immediately; reconciles on `poll:voted` socket; snapshot-restore on failure. Mock repo has the same math for `EXPO_PUBLIC_USE_MOCKS=true`. |
+| **F.7** Socket event `poll:voted` | n/a | ✅ (2026-05-26, PR-1) | Personalised per viewer (server iterates chat members; `options[].votedByMe` is per-recipient). Emitted on create, vote, and close. Delivered via the new per-user `user:{userId}` room (joined on connect; reused by 2.H call-ring). Mobile subscriber lands in `ensureSocketWired` and splices the fresh aggregate into the cached row. |
+| **F.8** Close-poll affordance (sender-only) | ✅ (2026-05-26, PR-2) | n/a | "Close poll" row in `MessageActionSheet` (icon `x-circle`) appears on mine + open POLL bubbles. Server still 403s non-senders for defence in depth. |
 
 ### Migration B — `20260527000000_add_polls`
 

@@ -14,6 +14,8 @@ import type {
   MessageReportAck,
   MuteChatBody,
   MuteChatResponse,
+  PollAggregate,
+  PollCreateRequestBody,
   ReactionAggregate,
   ReactionsList,
   SendMessageBody,
@@ -24,10 +26,19 @@ import * as LegacyFileSystem from 'expo-file-system/legacy';
 import { apiClient, ApiError } from '@/lib/api-client';
 import { chatSocket } from '@/lib/chat-socket';
 
-import type { Contact, Message, MessageStatus, SendMessageInput, Thread } from '../types';
+import type {
+  Contact,
+  CreatePollInput,
+  Message,
+  MessageStatus,
+  PollMessage,
+  SendMessageInput,
+  Thread,
+} from '../types';
 import type { ChatRepository, LoadOlderResult } from './chat-repository';
 import { dtoToMessage } from './dto-to-message';
 import { mockChatRepository } from './mock-chat-repository';
+import { applyVoteLocally } from './poll-vote-math';
 
 // Re-export so existing imports of `dtoToMessage` from this module continue to work.
 export { dtoToMessage };
@@ -144,6 +155,11 @@ function tombstoneContent(prev: Message): Partial<Message> {
       return { latitude: 0, longitude: 0, locationName: null };
     case 'contact':
       return { contactName: '', contactPhoneE164: '' };
+    case 'poll':
+      // Server zeroes `poll: null` on delete; the bubble's tombstone branch
+      // renders "This message was deleted" before reaching the poll renderer,
+      // so the cleared fields here are belt-and-braces.
+      return { question: '', options: [], totalVoters: 0, closedAt: null };
     default:
       return { mediaUrl: '', width: 0, height: 0 };
   }
@@ -341,6 +357,44 @@ function setPinnedAt(messageId: string, pinnedAt: string | null): void {
   notify();
 }
 
+// ─── Poll helpers (Tranche 2.F) ──────────────────────────────────────────────
+//
+// Optimistic math lives in `./poll-vote-math.ts` so it can be unit-tested
+// without dragging the api repo's MMKV / socket.io / expo-constants imports
+// into the Jest graph. The cache splice + restore stay here.
+
+/** Splice a fresh `PollAggregate` onto the cached PollMessage in place. */
+function applyPollAggregate(messageId: string, aggregate: PollAggregate): void {
+  const located = locateMessage(messageId);
+  if (!located) return;
+  const prev = located.message;
+  if (prev.type !== 'poll') return;
+  located.cache.messages[located.index] = {
+    ...prev,
+    closedAt: aggregate.closedAt,
+    totalVoters: aggregate.totalVoters,
+    options: aggregate.options,
+  };
+  notify();
+}
+
+/** Restore a snapshot of a poll's mutable state after an optimistic vote fails. */
+function restorePollSnapshot(
+  messageId: string,
+  snapshot: {
+    options: PollMessage['options'];
+    closedAt: string | null;
+    totalVoters: number;
+  },
+): void {
+  const located = locateMessage(messageId);
+  if (!located) return;
+  const prev = located.message;
+  if (prev.type !== 'poll') return;
+  located.cache.messages[located.index] = { ...prev, ...snapshot };
+  notify();
+}
+
 // ─── Socket event wiring (one-time) ───────────────────────────────────────────
 
 let socketWired = false;
@@ -417,6 +471,15 @@ function ensureSocketWired(): void {
     if (at < 0) return;
     cache.messages[at] = { ...cache.messages[at]!, pinnedAt: null } as Message;
     notify();
+  });
+
+  // Poll create / vote / close (Tranche 2.F). The server emits one
+  // `poll:voted` event per viewer with that viewer's personalised
+  // `votedByMe` flags, so we can write the aggregate straight onto the
+  // cached row. Idempotent with our own optimistic flip on self-echo:
+  // the broadcast's counts will equal what we already wrote.
+  chatSocket.onPollVoted((p) => {
+    applyPollAggregate(p.messageId, p.poll);
   });
 
   // When a peer (or our own other device) deletes a message, the server
@@ -945,6 +1008,100 @@ export const apiChatRepository: ChatRepository = {
       setPinnedAt(messageId, dto.pinnedAt ?? null);
     } catch (err) {
       setPinnedAt(messageId, prev);
+      throw err;
+    }
+  },
+
+  /**
+   * Create a poll (Tranche 2.F). POLL messages are server-authored, so unlike
+   * `sendMessage` we don't insert an optimistic bubble — the round-trip is
+   * <100ms and an optimistic POLL would race a 400 on invalid options. The
+   * server's `message:new` broadcast carries the durable bubble; we also
+   * upsert from the REST response so the caller can re-use the returned
+   * `PollMessage` directly (e.g. to scroll-to-bottom after the modal closes).
+   */
+  async createPoll(input: CreatePollInput) {
+    ensureSocketWired();
+    const body: PollCreateRequestBody = {
+      clientMessageId: input.clientMessageId,
+      question: input.question,
+      options: input.options,
+      multiSelect: input.multiSelect,
+      anonymous: false, // 1-on-1 UI hard-codes false (BRD line 519).
+    };
+    const dto = await apiClient.post<MessageDto>(`/chats/${input.threadId}/polls`, body);
+    const counterpartId = counterpartByChatId.get(input.threadId) ?? '';
+    const domain = dtoToMessage(dto, counterpartId);
+    upsertMessage(input.threadId, domain);
+    rememberSequence(input.threadId, dto.sequence);
+    notify();
+    return domain;
+  },
+
+  /**
+   * Cast / change a vote. Optimistic: flip the cached aggregate immediately
+   * (single-replace vs multi-diff math identical to the server's branching)
+   * and reconcile when the `poll:voted` broadcast lands. Failures (e.g. 409
+   * `poll_closed`) restore the snapshot and rethrow.
+   */
+  async votePoll(messageId, optionIds) {
+    const located = locateMessage(messageId);
+    let snapshot: { options: PollMessage['options']; closedAt: string | null; totalVoters: number } | null =
+      null;
+    if (located && located.message.type === 'poll') {
+      const poll = located.message;
+      snapshot = { options: poll.options, closedAt: poll.closedAt, totalVoters: poll.totalVoters };
+      const nextOptions = applyVoteLocally(poll.options, optionIds, poll.multiSelect);
+      const iVoteAfter = nextOptions.some((o) => o.votedByMe);
+      const iVoteBefore = poll.options.some((o) => o.votedByMe);
+      const totalDelta = iVoteAfter && !iVoteBefore ? 1 : !iVoteAfter && iVoteBefore ? -1 : 0;
+      located.cache.messages[located.index] = {
+        ...poll,
+        options: nextOptions,
+        totalVoters: Math.max(0, poll.totalVoters + totalDelta),
+      };
+      notify();
+    }
+    try {
+      const aggregate = await apiClient.post<PollAggregate>(
+        `/messages/${messageId}/vote`,
+        { optionIds },
+      );
+      applyPollAggregate(messageId, aggregate);
+    } catch (err) {
+      if (snapshot) restorePollSnapshot(messageId, snapshot);
+      throw err;
+    }
+  },
+
+  /**
+   * Close a poll (sender-only). The cached row already shows my view; we
+   * optimistically set `closedAt`, then reconcile from the response (which
+   * also fans out via `poll:voted` for the counterpart). On failure we
+   * restore the prior null.
+   */
+  async closePoll(messageId) {
+    const located = locateMessage(messageId);
+    let prevClosedAt: string | null = null;
+    if (located && located.message.type === 'poll') {
+      prevClosedAt = located.message.closedAt;
+      located.cache.messages[located.index] = {
+        ...located.message,
+        closedAt: new Date().toISOString(),
+      };
+      notify();
+    }
+    try {
+      const aggregate = await apiClient.post<PollAggregate>(
+        `/messages/${messageId}/poll/close`,
+        {},
+      );
+      applyPollAggregate(messageId, aggregate);
+    } catch (err) {
+      if (located && located.message.type === 'poll') {
+        located.cache.messages[located.index] = { ...located.message, closedAt: prevClosedAt };
+        notify();
+      }
       throw err;
     }
   },

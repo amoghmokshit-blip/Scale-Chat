@@ -5,7 +5,7 @@
  * For now we type the mock store the way the masked socket payloads will look.
  */
 
-import type { ReactionAggregate } from '@scalechat/shared';
+import type { PollAggregate, ReactionAggregate } from '@scalechat/shared';
 
 export type ThreadKind = 'direct' | 'group' | 'super';
 
@@ -176,6 +176,26 @@ export type ContactCardMessage = MessageBase & {
   contactPhoneE164: string;
 };
 
+/**
+ * Poll bubble (Tranche 2.F). Mirrors `PollAggregate` from `@scalechat/shared`
+ * with one tweak: `options[].votedByMe` is the local cache's optimistic state
+ * — the api repo flips it immediately on tap and reconciles to the server's
+ * authoritative aggregate when the `poll:voted` broadcast lands.
+ */
+export type PollMessage = MessageBase & {
+  type: 'poll';
+  /** The `PollMessage.id` (NOT the `Message.id` — that lives in `MessageBase.id`). */
+  pollMessageId: string;
+  question: string;
+  multiSelect: boolean;
+  anonymous: boolean;
+  /** ISO timestamp the poll was closed (sender-only), or null while open. */
+  closedAt: string | null;
+  /** Distinct voter count across all options (drives "N voted" subline). */
+  totalVoters: number;
+  options: PollAggregate['options'];
+};
+
 export type Message =
   | TextMessage
   | VoiceMessage
@@ -183,7 +203,8 @@ export type Message =
   | DocumentMessage
   | VideoMessage
   | LocationMessage
-  | ContactCardMessage;
+  | ContactCardMessage
+  | PollMessage;
 
 export type SendMessageInput =
   | {
@@ -265,6 +286,21 @@ export type SendMessageInput =
       clientMessageId: string;
       replyToMessageId?: string;
     };
+
+/**
+ * Polls don't go through `sendMessage` — they use a dedicated `createPoll`
+ * repo method because the server authors POLL `Message` rows directly (POLL
+ * is in `SERVER_ONLY_KINDS`). Multi-select defaults to false (BRD Q4 —
+ * WhatsApp parity). Anonymous is fixed false in the 1-on-1 UI (the toggle is
+ * hidden; the column exists for future Super Groups reuse).
+ */
+export type CreatePollInput = {
+  threadId: string;
+  clientMessageId: string;
+  question: string;
+  options: string[];
+  multiSelect: boolean;
+};
 
 /**
  * Filter pill state on the Contact Page. Mirrors the future

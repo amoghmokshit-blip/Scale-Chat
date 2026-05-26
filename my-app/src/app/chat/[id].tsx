@@ -144,9 +144,36 @@ export default function ChatThreadScreen() {
         counterpartName={thread?.counterpart.displayName}
         onLongPress={setSheetMessage}
         onToggleReaction={(emoji) => void handleTogglePill(item.message, emoji)}
+        onVotePoll={(messageId, optionIds) => void handleVotePoll(messageId, optionIds)}
       />
     );
   };
+
+  // Tranche 2.F — vote on a poll bubble. Optimistic flip is handled by the
+  // repo (api + mock both implement single-replace vs multi-diff math); the
+  // bubble updates locally before the network call returns. Show an alert
+  // for 409 `poll_closed` so the user understands why their tap was no-op.
+  async function handleVotePoll(messageId: string, optionIds: string[]) {
+    const fn = chatRepository.votePoll;
+    if (!fn) return;
+    try {
+      await fn.call(chatRepository, messageId, optionIds);
+    } catch {
+      Alert.alert('Could not vote', ChatCopy.poll.voteFailed);
+    }
+  }
+
+  async function handleClosePoll() {
+    const target = sheetMessage;
+    if (!target || target.type !== 'poll') return;
+    const fn = chatRepository.closePoll;
+    if (!fn) return;
+    try {
+      await fn.call(chatRepository, target.id);
+    } catch {
+      Alert.alert('Could not close poll', ChatCopy.poll.closeFailed);
+    }
+  }
 
   // ─── Tranche 2.A reactions handlers ───────────────────────────────────────
   // Quick-react from the strip in MessageActionSheet. Adds the emoji to the
@@ -512,6 +539,7 @@ export default function ChatThreadScreen() {
           if (m) setReportTarget(m);
         }}
         onReact={(emoji) => void handleQuickReact(emoji)}
+        onClosePoll={() => void handleClosePoll()}
         onOpenEmojiPicker={() => {
           // Close the action sheet first so the picker isn't stacked on top of
           // the menu's dim backdrop. Capture the target id since closing the
@@ -548,6 +576,7 @@ export default function ChatThreadScreen() {
         onPickDocument={() => void handlePickDocument()}
         onPickContact={handlePickContact}
         onPickLocation={() => void handlePickLocation()}
+        onPickPoll={() => router.push({ pathname: '/chat/compose-poll', params: { threadId: id } })}
       />
 
       <VoiceRecorderOverlay

@@ -43,6 +43,7 @@ function makeDto(overrides: Partial<MessageDto>): MessageDto {
     createdAt: '2026-05-25T10:00:00.000Z',
     deletedAt: null,
     reactions: [],
+    poll: null,
     ...overrides,
   };
 }
@@ -238,6 +239,72 @@ describe('dtoToMessage — LOCATION + CONTACT_CARD (Tranche 2.D)', () => {
     expect(m.type).toBe('contact');
     expect(m.contactName).toBe('Priya');
     expect(m.contactPhoneE164).toBe('+919620304050');
+  });
+});
+
+describe('dtoToMessage — POLL (Tranche 2.F)', () => {
+  const POLL_MESSAGE_ID = '44444444-0000-4000-8000-000000000044';
+  const OPTION_A = '55555555-0000-4000-8000-00000000aaaa';
+  const OPTION_B = '55555555-0000-4000-8000-00000000bbbb';
+
+  it('maps a POLL message with options + votedByMe + totalVoters', () => {
+    const dto = makeDto({
+      kind: 'POLL',
+      text: null,
+      poll: {
+        pollMessageId: POLL_MESSAGE_ID,
+        question: 'Lunch?',
+        multiSelect: false,
+        anonymous: false,
+        closedAt: null,
+        totalVoters: 1,
+        options: [
+          { id: OPTION_A, ordinal: 0, label: 'Pizza', count: 1, votedByMe: true },
+          { id: OPTION_B, ordinal: 1, label: 'Sushi', count: 0, votedByMe: false },
+        ],
+      },
+    });
+    const m = dtoToMessage(dto, COUNTERPART_ID) as Extract<ReturnType<typeof dtoToMessage>, { type: 'poll' }>;
+    expect(m.type).toBe('poll');
+    expect(m.pollMessageId).toBe(POLL_MESSAGE_ID);
+    expect(m.question).toBe('Lunch?');
+    expect(m.multiSelect).toBe(false);
+    expect(m.totalVoters).toBe(1);
+    expect(m.closedAt).toBeNull();
+    expect(m.options).toEqual([
+      { id: OPTION_A, ordinal: 0, label: 'Pizza', count: 1, votedByMe: true },
+      { id: OPTION_B, ordinal: 1, label: 'Sushi', count: 0, votedByMe: false },
+    ]);
+  });
+
+  it('carries closedAt through so the bubble shows "Poll closed"', () => {
+    const dto = makeDto({
+      kind: 'POLL',
+      text: null,
+      poll: {
+        pollMessageId: POLL_MESSAGE_ID,
+        question: 'Lunch?',
+        multiSelect: true,
+        anonymous: false,
+        closedAt: '2026-05-26T10:30:00.000Z',
+        totalVoters: 2,
+        options: [
+          { id: OPTION_A, ordinal: 0, label: 'Pizza', count: 1, votedByMe: false },
+          { id: OPTION_B, ordinal: 1, label: 'Sushi', count: 1, votedByMe: true },
+        ],
+      },
+    });
+    const m = dtoToMessage(dto, COUNTERPART_ID) as Extract<ReturnType<typeof dtoToMessage>, { type: 'poll' }>;
+    expect(m.closedAt).toBe('2026-05-26T10:30:00.000Z');
+    expect(m.multiSelect).toBe(true);
+  });
+
+  it('falls back to type:text when kind is POLL but the server omits the aggregate', () => {
+    // Defensive: an in-flight or legacy DTO with kind:POLL + poll:null should
+    // not crash the bubble — the mapper falls through to the final text branch.
+    const dto = makeDto({ kind: 'POLL', text: null, poll: null });
+    const m = dtoToMessage(dto, COUNTERPART_ID);
+    expect(m.type).toBe('text');
   });
 });
 

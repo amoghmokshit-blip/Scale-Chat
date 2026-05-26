@@ -90,5 +90,18 @@ export function dtoToMessage(m: MessageDto, counterpartId: string): Message {
       contactPhoneE164: m.contactPhoneE164 ?? '',
     };
   }
+  if (m.kind === 'POLL' && m.poll) {
+    return {
+      ...base,
+      type: 'poll',
+      pollMessageId: m.poll.pollMessageId,
+      question: m.poll.question,
+      multiSelect: m.poll.multiSelect,
+      anonymous: m.poll.anonymous,
+      closedAt: m.poll.closedAt,
+      totalVoters: m.poll.totalVoters,
+      options: m.poll.options,
+    };
+  }
   return { ...base, type: 'text', text: m.text ?? '' };
 }

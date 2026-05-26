@@ -22,6 +22,12 @@ export default function ChatLayout() {
         name="pick-contact"
         options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
       />
+      {/* Poll composer (Tranche 2.F) — same modal-sibling pattern. Question +
+          2–10 options + multi-select switch; submit calls `chatRepository.createPoll`. */}
+      <Stack.Screen
+        name="compose-poll"
+        options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
+      />
     </Stack>
   );
 }

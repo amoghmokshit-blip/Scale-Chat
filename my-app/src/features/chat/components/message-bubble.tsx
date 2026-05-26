@@ -11,6 +11,7 @@ import { ContactCard } from './contact-card';
 import { DocumentBubble } from './document-bubble';
 import { ImageBubble } from './image-bubble';
 import { LocationCard } from './location-card';
+import { PollBubble } from './poll-bubble';
 import { ReactionsPillRow } from './reactions-pill-row';
 import { VideoBubble } from './video-bubble';
 import { VoicePlayer } from './voice-player';
@@ -31,6 +32,12 @@ type Props = {
    * already reacted with that emoji, removes if `reactedByMe`). Tranche 2.A.
    */
   onToggleReaction?: (emoji: string) => void;
+  /**
+   * Tap a poll option — fires with the FULL post-tap selection set so the
+   * caller can authoritative-diff (Tranche 2.F). Caller passes the message id
+   * up so the screen can route to `votePoll(messageId, optionIds)`.
+   */
+  onVotePoll?: (messageId: string, optionIds: string[]) => void;
 };
 
 /**
@@ -57,6 +64,7 @@ export function MessageBubble({
   counterpartName,
   onLongPress,
   onToggleReaction,
+  onVotePoll,
 }: Props) {
   const bg = isMine ? Brand.chatBubbleMine : Brand.chatBubbleTheirs;
   const color = isMine ? Brand.chatBubbleMineText : Brand.chatBubbleTheirsText;
@@ -190,6 +198,12 @@ export function MessageBubble({
           <LocationCard message={message} isMine={isMine} />
         ) : message.type === 'contact' ? (
           <ContactCard message={message} isMine={isMine} />
+        ) : message.type === 'poll' ? (
+          <PollBubble
+            message={message}
+            isMine={isMine}
+            onVote={(optionIds) => onVotePoll?.(message.id, optionIds)}
+          />
         ) : null}
       </Pressable>
       <View
@@ -251,6 +265,9 @@ function replyPreview(replyTarget: Message): string {
   }
   if (replyTarget.type === 'contact') {
     return `👤 ${replyTarget.contactName || ChatCopy.contact.bubbleFallback}`;
+  }
+  if (replyTarget.type === 'poll') {
+    return `📊 ${replyTarget.question || ChatCopy.poll.composerTitle}`;
   }
   return '📷 Photo';
 }

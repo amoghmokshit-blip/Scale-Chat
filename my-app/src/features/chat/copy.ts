@@ -70,6 +70,27 @@ export const ChatCopy = {
     document: 'Document',
     contact: 'Contact',
     location: 'Location',
+    poll: 'Poll',
+  },
+
+  /** Polls (Tranche 2.F — 1-on-1 scope). */
+  poll: {
+    composerTitle: 'New poll',
+    questionPlaceholder: 'Ask a question…',
+    optionPlaceholder: (n: number) => `Option ${n}`,
+    addOption: 'Add option',
+    multiSelectLabel: 'Allow multiple answers',
+    create: 'Create poll',
+    creating: 'Creating…',
+    /** Subline below the bubble — "N voted" with pluralisation. */
+    votedCount: (n: number) => (n === 1 ? '1 voted' : `${n} voted`),
+    closed: 'Poll closed',
+    closeAction: 'Close poll',
+    closeFailed: 'Could not close the poll. Please try again.',
+    voteFailed: 'Could not record your vote. Please try again.',
+    /** Validation toasts. */
+    needTwoOptions: 'A poll needs at least 2 options.',
+    duplicateOption: 'Each option must be unique.',
   },
 
   /** Document + Video kinds (Tranche 2.C). */

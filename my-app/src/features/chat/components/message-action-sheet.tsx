@@ -41,6 +41,8 @@ type Props = {
   onReact?: (emoji: string) => void;
   /** Opens the full emoji picker — wired by the parent screen. */
   onOpenEmojiPicker?: () => void;
+  /** Close-poll action — appears on mine + open POLL bubbles (Tranche 2.F). */
+  onClosePoll?: () => void;
 };
 
 /**
@@ -69,6 +71,7 @@ export function MessageActionSheet({
   onUnpin,
   onReact,
   onOpenEmojiPicker,
+  onClosePoll,
 }: Props) {
   if (!message) return null;
 
@@ -108,6 +111,21 @@ export function MessageActionSheet({
     }
     if (isText) {
       actions.push({ key: 'copy', label: 'Copy', icon: 'copy', onPress: onCopy });
+    }
+    // Close poll — only for the poll's author, only while open. Server enforces
+    // sender-only too (403 `not_sender`) for defence in depth.
+    if (
+      isMine &&
+      message.type === 'poll' &&
+      message.closedAt == null &&
+      onClosePoll
+    ) {
+      actions.push({
+        key: 'close-poll',
+        label: ChatCopy.poll.closeAction,
+        icon: 'x-circle',
+        onPress: onClosePoll,
+      });
     }
   }
   if (isMine && !isTombstone) {

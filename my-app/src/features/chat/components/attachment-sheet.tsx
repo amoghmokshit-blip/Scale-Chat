@@ -31,6 +31,8 @@ type Props = {
   /** Contact + Location pickers (Tranche 2.D). */
   onPickContact: () => void;
   onPickLocation: () => void;
+  /** Poll composer (Tranche 2.F). */
+  onPickPoll: () => void;
 };
 
 /**
@@ -48,6 +50,7 @@ export function AttachmentSheet({
   onPickDocument,
   onPickContact,
   onPickLocation,
+  onPickPoll,
 }: Props) {
   const tiles: Tile[] = [
     {
@@ -97,6 +100,16 @@ export function AttachmentSheet({
       icon: { lib: 'feather', name: 'map-pin' },
       onPress: () => {
         onPickLocation();
+        onClose();
+      },
+    },
+    {
+      key: 'poll',
+      label: ChatCopy.attachments.poll,
+      tint: '#FFC857',
+      icon: { lib: 'feather', name: 'bar-chart-2' },
+      onPress: () => {
+        onPickPoll();
         onClose();
       },
     },

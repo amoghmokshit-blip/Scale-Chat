@@ -3,7 +3,7 @@ import { MAX_PINNED_PER_CHAT } from '@scalechat/shared';
 import { ApiError } from '@/lib/api-client';
 import { StorageKeys, getJson, setJson } from '@/lib/mmkv';
 
-import type { Message, Thread } from '../types';
+import type { CreatePollInput, Message, PollMessage, Thread } from '../types';
 import type { ChatRepository } from './chat-repository';
 import { SEED_CONTACT_BY_ID, SEED_MESSAGES, SEED_THREADS } from './seed';
 
@@ -227,7 +227,9 @@ export const mockChatRepository: ChatRepository = {
                 ? { latitude: 0, longitude: 0, locationName: null }
                 : prev.type === 'contact'
                   ? { contactName: '', contactPhoneE164: '' }
-                  : { mediaUrl: '', width: 0, height: 0 }),
+                  : prev.type === 'poll'
+                    ? { question: '', options: [], totalVoters: 0, closedAt: null }
+                    : { mediaUrl: '', width: 0, height: 0 }),
     } as Message;
     s.messagesByThread[threadId] = [...list.slice(0, at), tombstone, ...list.slice(at + 1)];
     persist();
@@ -415,6 +417,129 @@ export const mockChatRepository: ChatRepository = {
       ...list.slice(at + 1),
     ];
     persist();
+  },
+
+  // Polls (Tranche 2.F). Mock parity with the real `PollsModule`:
+  //   - createPoll appends a PollMessage row with `totalVoters: 0` + all
+  //     `votedByMe: false` to the target thread.
+  //   - votePoll branches single-select replace vs multi-select diff using
+  //     the same shape as the api repo's `applyVoteLocally`. The single local
+  //     voter is treated as `me`.
+  //   - closePoll is sender-only — throws `not_sender` ApiError when called
+  //     by a non-author so the same error path runs as against the server.
+  async createPoll(input: CreatePollInput) {
+    await sleep();
+    const s = getState();
+    const sequence = nextSequence(input.threadId);
+    const pollMessageId = `mockpoll-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const poll: PollMessage = {
+      id: input.clientMessageId,
+      threadId: input.threadId,
+      senderId: 'me',
+      sequence,
+      createdAt: new Date().toISOString(),
+      status: 'sent',
+      clientMessageId: input.clientMessageId,
+      replyToMessageId: null,
+      deletedAt: null,
+      type: 'poll',
+      pollMessageId,
+      question: input.question,
+      multiSelect: input.multiSelect,
+      anonymous: false,
+      closedAt: null,
+      totalVoters: 0,
+      options: input.options.map((label, i) => ({
+        id: `${pollMessageId}-${i}`,
+        ordinal: i,
+        label,
+        count: 0,
+        votedByMe: false,
+      })),
+    };
+    const list = s.messagesByThread[input.threadId] ?? [];
+    s.messagesByThread = {
+      ...s.messagesByThread,
+      [input.threadId]: [...list, poll],
+    };
+    s.threads = s.threads.map((t) =>
+      t.id === input.threadId
+        ? { ...t, lastMessage: poll, lastReadSequence: sequence, unreadCount: 0 }
+        : t,
+    );
+    persist();
+    return clone(poll);
+  },
+
+  async votePoll(messageId, optionIds) {
+    await sleep();
+    const s = getState();
+    for (const threadId of Object.keys(s.messagesByThread)) {
+      const list = s.messagesByThread[threadId]!;
+      const at = list.findIndex((m) => m.id === messageId);
+      if (at < 0) continue;
+      const msg = list[at]!;
+      if (msg.type !== 'poll') return;
+      if (msg.closedAt) {
+        throw new ApiError(409, {
+          code: 'poll_closed',
+          message: 'This poll has been closed.',
+        });
+      }
+      const selected = new Set(optionIds);
+      const nextOptions = msg.options.map((opt) => {
+        const wantsVote = selected.has(opt.id);
+        if (wantsVote && !opt.votedByMe) {
+          return { ...opt, count: opt.count + 1, votedByMe: true };
+        }
+        if (!wantsVote && opt.votedByMe) {
+          return { ...opt, count: Math.max(0, opt.count - 1), votedByMe: false };
+        }
+        return opt;
+      });
+      const iVoteAfter = nextOptions.some((o) => o.votedByMe);
+      const iVoteBefore = msg.options.some((o) => o.votedByMe);
+      const totalDelta = iVoteAfter && !iVoteBefore ? 1 : !iVoteAfter && iVoteBefore ? -1 : 0;
+      s.messagesByThread[threadId] = [
+        ...list.slice(0, at),
+        {
+          ...msg,
+          options: nextOptions,
+          totalVoters: Math.max(0, msg.totalVoters + totalDelta),
+        },
+        ...list.slice(at + 1),
+      ];
+      persist();
+      return;
+    }
+  },
+
+  async closePoll(messageId) {
+    await sleep();
+    const s = getState();
+    for (const threadId of Object.keys(s.messagesByThread)) {
+      const list = s.messagesByThread[threadId]!;
+      const at = list.findIndex((m) => m.id === messageId);
+      if (at < 0) continue;
+      const msg = list[at]!;
+      if (msg.type !== 'poll') return;
+      // Mock has a single local user (`me`) — only sender can close. If the
+      // poll was authored by the counterpart, mirror the server's 403.
+      if (msg.senderId !== 'me') {
+        throw new ApiError(403, {
+          code: 'not_sender',
+          message: 'Only the poll creator can close this poll.',
+        });
+      }
+      if (msg.closedAt) return; // idempotent
+      s.messagesByThread[threadId] = [
+        ...list.slice(0, at),
+        { ...msg, closedAt: new Date().toISOString() },
+        ...list.slice(at + 1),
+      ];
+      persist();
+      return;
+    }
   },
 
   async markThreadRead(threadId) {

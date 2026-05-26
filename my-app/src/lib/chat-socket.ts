@@ -6,6 +6,7 @@ import {
   type SocketMessageUnpinned,
   type SocketMessageSendAck,
   type SocketMessageSendPayload,
+  type SocketPollVoted,
   type SocketPresenceUpdate,
   type SocketReactionUpdated,
   type SocketReadReceipt,
@@ -43,6 +44,7 @@ type Listeners = {
   reactionUpdated: Set<(r: SocketReactionUpdated) => void>;
   messagePinned: Set<(p: SocketMessagePinned) => void>;
   messageUnpinned: Set<(p: SocketMessageUnpinned) => void>;
+  pollVoted: Set<(p: SocketPollVoted) => void>;
   connectionChange: Set<(connected: boolean) => void>;
 };
 
@@ -65,6 +67,7 @@ class ChatSocketManager {
     reactionUpdated: new Set(),
     messagePinned: new Set(),
     messageUnpinned: new Set(),
+    pollVoted: new Set(),
     connectionChange: new Set(),
   };
 
@@ -245,6 +248,16 @@ class ChatSocketManager {
     return () => this.listeners.messageUnpinned.delete(listener);
   }
 
+  /**
+   * Subscribe to `poll:voted` broadcasts (Tranche 2.F). Personalised per
+   * viewer — the server iterates chat members so each recipient receives
+   * their own `votedByMe` flags. Fired on poll create, vote, and close.
+   */
+  onPollVoted(listener: (p: SocketPollVoted) => void): () => void {
+    this.listeners.pollVoted.add(listener);
+    return () => this.listeners.pollVoted.delete(listener);
+  }
+
   onConnectionChange(listener: (connected: boolean) => void): () => void {
     this.listeners.connectionChange.add(listener);
     return () => this.listeners.connectionChange.delete(listener);
@@ -279,6 +292,9 @@ class ChatSocketManager {
     });
     socket.on(SocketEvents.messageUnpinned, (p: SocketMessageUnpinned) => {
       this.listeners.messageUnpinned.forEach((l) => l(p));
+    });
+    socket.on(SocketEvents.pollVoted, (p: SocketPollVoted) => {
+      this.listeners.pollVoted.forEach((l) => l(p));
     });
   }
 

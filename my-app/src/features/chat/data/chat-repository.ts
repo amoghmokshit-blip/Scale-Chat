@@ -7,7 +7,7 @@ import type {
   UserProfileCard,
 } from '@scalechat/shared';
 
-import type { Message, SendMessageInput, Thread } from '../types';
+import type { CreatePollInput, Message, SendMessageInput, Thread } from '../types';
 
 export type LoadOlderResult = {
   /** Older messages prepended (chronological ASC). */
@@ -127,6 +127,25 @@ export interface ChatRepository {
   pinMessage?(threadId: string, messageId: string): Promise<void>;
   /** Unpin a message. Idempotent server-side (200 even if it wasn't pinned). */
   unpinMessage?(threadId: string, messageId: string): Promise<void>;
+  /**
+   * Create a poll (Tranche 2.F). Server authors the POLL message (POLL is
+   * server-only) and broadcasts `message:new` + per-viewer `poll:voted`; the
+   * api repo upserts the new bubble into the local cache via the socket
+   * subscriber, then resolves with the returned `PollMessage`. Mock repo
+   * inserts directly into the snapshot.
+   */
+  createPoll?(input: CreatePollInput): Promise<Message>;
+  /**
+   * Cast / change a vote. `optionIds` is the FULL post-vote selection set:
+   * the server diff-applies. Single-select polls accept exactly one id;
+   * multi-select 1..N. Optimistic: the cached bubble flips `votedByMe` +
+   * counts immediately and reconciles when the `poll:voted` socket lands.
+   * On failure (e.g. 409 `poll_closed`) the prior aggregate is restored
+   * and the error is rethrown.
+   */
+  votePoll?(messageId: string, optionIds: string[]): Promise<void>;
+  /** Close a poll (sender-only). Idempotent if already closed. */
+  closePoll?(messageId: string): Promise<void>;
   /** Subscribe to repository changes (any thread/message update). */
   subscribe(listener: () => void): () => void;
 }
