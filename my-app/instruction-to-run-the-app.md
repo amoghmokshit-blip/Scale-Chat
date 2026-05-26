@@ -32,11 +32,18 @@ npm run api:dev
 Leave the backend running in one terminal. In a **second terminal**, configure the mobile app:
 
 ```powershell
-# 4. Create the mobile env file so the emulator app can reach the backend.
-#    The Android emulator can't reach `localhost` — it must use 10.0.2.2 (gateway to host).
-#    Create my-app/.env.local with this single line:
+# 4. Create the mobile env file. The Android emulator can't reach `localhost`
+#    — it must use 10.0.2.2 (gateway to host). Create my-app/.env.local with:
 #       EXPO_PUBLIC_API_URL=http://10.0.2.2:4000
-#    (Note: .env.local is gitignored — each developer creates their own.)
+#       EXPO_PUBLIC_USE_MOCKS=true      # mock data, no backend needed (recommended to start)
+#    (.env.local is gitignored — each developer creates their own.)
+#
+#    EXPO_PUBLIC_USE_MOCKS=true  → the app runs fully offline against the committed
+#      mock seed (realistic +91 contacts/threads + sample image/voice/document/
+#      video/location/contact messages). Auth is mocked: any +91 number, OTP `1234`,
+#      any name. No backend required — best way to start.
+#    EXPO_PUBLIC_USE_MOCKS=false → live backend (steps 2–3 above). OTP is real MSG91
+#      SMS unless the backend runs with ENABLE_DEV_OTP=true + DEV_OTP_CODE set.
 ```
 
 In a **third terminal**:
@@ -115,17 +122,19 @@ Add `--clean` (already included in the script) to nuke + regenerate. After re-pr
 
 ---
 
-## What's deferred to later tranches
+## Current state (what's shipped)
 
-- **iOS development** — requires Mac + Xcode for local builds OR EAS Build for cloud builds. Deferred to **Tranche 2.I** when the call slice ships (which needs real-device push wakeup testing that emulators can't reliably simulate).
-- **EAS Build (cloud builds + store distribution)** — Apple Developer enrollment + Google Play Console + EAS profile config. Lands together with Tranche 2.I.
-- **Push notifications** (`expo-notifications`) — Tranche 2.I.
-- **Voice/video calls** (100ms or LiveKit Cloud RN SDK) — Tranche 2.H (backend signalling) + Tranche 2.I (mobile UI).
-- **Map picker** (`react-native-maps`) + **Location** (`expo-location`) — Tranche 2.D. **Heads-up**: `react-native-maps` requires a `GOOGLE_MAPS_API_KEY` placeholder in `app.json` BEFORE Gradle manifest-merger; without it the app crashes on the first map screen. The 2.D PR handles this.
-- **Document attachments** (`expo-document-picker`) — Tranche 2.C.
-- **Reactions mobile UI** (`rn-emoji-keyboard`) — Tranche 2.A.
+The chat-expansion attachment slice is **complete**. Shipped tranches: 2.A (reactions), 2.B (schema foundation), 2.C (document + video), 2.D (location + contact), 2.E (forward + pin). Per-tranche detail: [`docs/progress/1-on-1-chat-expansion.md`](../docs/progress/1-on-1-chat-expansion.md).
 
-Each tranche that adds a native dep also addresses its row in the **Tranche 2.0 Knowledge base** (MultiDex, Gradle heap, ABI restriction, Maps API key, AudioFocus coordination, etc.) — see [`docs/progress/1-on-1-chat-expansion.md`](../docs/progress/1-on-1-chat-expansion.md) § "Knowledge base for future native-dep tranches" (items K1–K10).
+> **Native deps are already in this checkout** (`expo-image-picker`, `expo-audio`, `expo-contacts`, `expo-video`, `expo-document-picker`, `expo-location`, `react-native-mmkv`, …). So your **first run MUST be a full native build** — `npm run dev:android` (which prebuilds + compiles + installs the dev client). Expo Go and a plain `npm run dev:start` will fail with "native module not found" until the dev client is built once.
+
+### Still to do (later tranches)
+
+- **2.F Polls** — full-stack (new migration + PollsModule + composer + bubble). Doable on this mock/emulator flow.
+- **2.H Calls signalling (server)** — the headline. Needs a LiveKit-vs-100ms provider POC + WebRTC.
+- **2.I Call UI + push + EAS** — depends on 2.H; first tranche to require **EAS Build + an Apple Dev account** + **iOS** (Mac + Xcode or EAS cloud builds). Push notifications (`expo-notifications`) land here too.
+
+Each tranche that adds a native dep addresses its row in the **Knowledge base** (MultiDex, Gradle heap, ABI restriction, Maps API key, AudioFocus, duplicate `libwebrtc.so`, etc.) — see [`docs/progress/1-on-1-chat-expansion.md`](../docs/progress/1-on-1-chat-expansion.md) § "Knowledge base for future native-dep tranches" (K1–K12).
 
 ---
 
