@@ -733,23 +733,24 @@ All four optional (mirror `R2_*` pattern at `media.service.ts:65-74`); if any un
 
 ---
 
-## Tranche 2.I — Call UI + push wakeup
+## Tranche 2.I — Call UI + push wakeup ✅ LANDED 2026-05-26
 
-Final tranche. Wires the 100ms RN SDK + the IncomingCallScreen + push notifications. **First tranche to require a custom dev client** (100ms native; loses Expo Go).
+Final tranche. Wires the **LiveKit** RN SDK (provider switched from 100ms — see calls-provider-poc.md §8.1) + IncomingCallScreen + CallScreen + Expo push wakeup. **Custom dev client** (LiveKit/WebRTC native; loses Expo Go). Native build verified compiling/installing on RN 0.85; whole app `expo export`-bundles clean; backend e2e 53 pass / 6 todo; real LiveKit token+room verified against the cloud.
 
 ### Status table
 
 | Sub-item | Frontend | Backend | Notes |
 |---|---|---|---|
-| **I.1** Migration D — `UserDevice` table | n/a | 🚫 | `expoPushToken UNIQUE`, platform, lastActiveAt |
-| **I.2** `PushModule` | n/a | 🚫 | `POST /push/tokens` upsert; `notify({ userIds, payload, opts })` |
-| **I.3** Mute-aware push filter | n/a | 🚫 | Skip muted memberships EXCEPT for `call:ring` |
-| **I.4** 100ms SDK install + plugin block | 🚫 | n/a | `@100mslive/react-native-hms` + `@100mslive/react-native-room-kit` |
-| **I.5** `app/call/[callId].tsx` CallScreen | 🚫 | n/a | Renders `<HMSPrebuilt>`; onLeave → hangup |
-| **I.6** `app/call/incoming/[callId].tsx` IncomingCallScreen | 🚫 | n/a | Ring/accept/decline state machine |
-| **I.7** `CallRingListener` shell mount | 🚫 | n/a | Global socket listener for `call:ring` |
-| **I.8** Push wakeup → IncomingCallScreen | 🚫 | n/a | `expo-notifications` handler routes to incoming screen |
-| **I.9** ComingSoonSheet voice/video keys removed | 🚫 | n/a | Disconnect from `chat-header.tsx`; keep for chatTheme + exportChat per CLAUDE.md row |
+| **I.1** Migration D — `UserDevice` table | n/a | ✅ | `20260529000000_add_user_devices`: `expo_push_token` UNIQUE, platform, lastActiveAt, FK CASCADE |
+| **I.2** `PushModule` | n/a | ✅ | `POST/DELETE /push/tokens` upsert; `notifyCall()` via fetch to Expo push (SDK is ESM-only). Prunes DeviceNotRegistered. |
+| **I.3** Mute-aware push | n/a | ✅ | `notifyCall` is call:ring → ALWAYS sends (never mute-suppressed); inline (no queue — 1-on-1 = single callee) |
+| **I.4** Provider SDK install + plugins | ✅ | n/a | `@livekit/react-native` + `@livekit/react-native-webrtc` + `@config-plugins/react-native-webrtc` + `@livekit/react-native-expo-plugin` + `expo-notifications` + `livekit-client`. app.json plugins + K2 heap plugin. |
+| **I.5** `chat/call.tsx` CallScreen | ✅ | n/a | `<LiveKitRoom>` (audio always, video for VIDEO) + mute/camera/hangup; abnormal-termination → hangup; AudioSession (K5) |
+| **I.6** `chat/incoming-call.tsx` IncomingCallScreen | ✅ | n/a | Caller card from ring payload; accept/decline; auto-dismiss on call:taken/ended |
+| **I.7** `CallRingListener` shell mount | ✅ | n/a | Global `onCallRing` (+ background push) → route to incoming-call; `registerGlobals()` in root layout |
+| **I.8** Push wakeup → IncomingCallScreen | ✅ | n/a | `expo-notifications` response listener routes a `call:ring` data payload |
+| **I.9** ComingSoonSheet voice/video keys removed | ✅ | n/a | Header buttons now `startCall`; comingSoon kept for chatTheme + exportChat |
+| **I.10** EAS + iOS scaffold | ✅ | n/a | eas.json Android apk/aab + iOS sim profile; `docs/architecture/ios-enablement-checklist.md` (Android-now, iOS-on-Apple-cert) |
 
 ### Migration D — `20260529000000_add_user_devices`
 

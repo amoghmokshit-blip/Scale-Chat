@@ -28,7 +28,8 @@ export async function registerForPushAsync(): Promise<void> {
       await Notifications.setNotificationChannelAsync('calls', {
         name: 'Calls',
         importance: Notifications.AndroidImportance.MAX,
-        sound: 'default',
+        // Omit `sound` → use the system default ringtone. Passing the literal
+        // 'default' expects a bundled sound asset of that name and warns.
         vibrationPattern: [0, 250, 250, 250],
         lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
         bypassDnd: true,
