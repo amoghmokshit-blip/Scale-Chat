@@ -57,6 +57,10 @@ export function MessageBubble({
   const bg = isMine ? Brand.chatBubbleMine : Brand.chatBubbleTheirs;
   const color = isMine ? Brand.chatBubbleMineText : Brand.chatBubbleTheirsText;
   const isTombstone = message.deletedAt != null;
+  // Pin pip shows only on a live, pinned message — never on a tombstone
+  // (pin-then-delete leaves `pinnedAt` set, but a deleted message shouldn't
+  // advertise a pin).
+  const isPinned = message.pinnedAt != null && !isTombstone;
 
   // Image bubbles render the image as the entire bubble surface — no rounded
   // chat-bubble background underneath, no reply quote inside (we render the
@@ -85,8 +89,10 @@ export function MessageBubble({
             styles.metaRow,
             isMine ? { justifyContent: 'flex-end' } : { justifyContent: 'flex-start' },
           ]}>
+          {!isMine && isPinned ? <PinPip /> : null}
           {isMine ? <DeliveryTicks status={message.status} /> : null}
           <ThemedText style={styles.meta}>{formatBubbleTime(message.createdAt)}</ThemedText>
+          {isMine && isPinned ? <PinPip /> : null}
         </View>
         <ReactionsPillRow
           reactions={message.reactions}
@@ -176,8 +182,10 @@ export function MessageBubble({
           styles.metaRow,
           isMine ? { justifyContent: 'flex-end' } : { justifyContent: 'flex-start' },
         ]}>
+        {!isMine && isPinned ? <PinPip /> : null}
         {isMine && !isTombstone ? <DeliveryTicks status={message.status} /> : null}
         <ThemedText style={styles.meta}>{formatBubbleTime(message.createdAt)}</ThemedText>
+        {isMine && isPinned ? <PinPip /> : null}
       </View>
       {!isTombstone ? (
         <ReactionsPillRow
@@ -201,6 +209,13 @@ function ForwardedLabel({ color }: { color: string }) {
       </ThemedText>
     </View>
   );
+}
+
+/** Small pin marker in the meta row when a message is pinned. Grey (NOT lime —
+ *  lime would collide with the lime read double-tick sitting in the same row).
+ *  Placed away from the ticks (leading on theirs, trailing on mine). */
+function PinPip() {
+  return <Feather name="bookmark" size={11} color={Brand.chatTimestamp} style={styles.pinPip} />;
 }
 
 /** Single-line preview shown inside a reply quote — depends on source kind. */
@@ -318,6 +333,9 @@ const styles = StyleSheet.create({
   },
   tickIcon: {
     marginRight: 4,
+  },
+  pinPip: {
+    marginHorizontal: 3,
   },
   doubleTick: {
     flexDirection: 'row',

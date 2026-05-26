@@ -118,6 +118,15 @@ export interface ChatRepository {
     messageId: string,
     targetThreadIds: string[],
   ): Promise<{ delivered: number; skipped: number }>;
+  /**
+   * Pin a message in a chat (Tranche 2.E). Optimistic — flips `pinnedAt`
+   * immediately and the server confirms via `message:pinned` socket broadcast.
+   * Throws an `ApiError` with `code: 'pin_cap_exceeded'` (409) when the chat
+   * already has the max (3) pinned messages.
+   */
+  pinMessage?(threadId: string, messageId: string): Promise<void>;
+  /** Unpin a message. Idempotent server-side (200 even if it wasn't pinned). */
+  unpinMessage?(threadId: string, messageId: string): Promise<void>;
   /** Subscribe to repository changes (any thread/message update). */
   subscribe(listener: () => void): () => void;
 }

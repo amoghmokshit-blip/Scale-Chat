@@ -310,6 +310,15 @@ function restoreReactions(messageId: string, prev: ReactionAggregate[] | undefin
   notify();
 }
 
+/** Set a message's `pinnedAt` in the cache + notify. Used by the optimistic
+ *  pin/unpin path (flip → reconcile / rollback) and the pin socket subscribers. */
+function setPinnedAt(messageId: string, pinnedAt: string | null): void {
+  const located = locateMessage(messageId);
+  if (!located) return;
+  located.cache.messages[located.index] = { ...located.message, pinnedAt } as Message;
+  notify();
+}
+
 // ─── Socket event wiring (one-time) ───────────────────────────────────────────
 
 let socketWired = false;
@@ -364,6 +373,27 @@ function ensureSocketWired(): void {
     if (at < 0) return;
     const prev = cache.messages[at]!;
     cache.messages[at] = { ...prev, reactions: r.reactions } as Message;
+    notify();
+  });
+
+  // Pin / unpin broadcasts (Tranche 2.E). Flip the cached row's `pinnedAt` so
+  // the bubble pin pip updates live for everyone in the chat. The unpinned
+  // payload carries no `pinnedAt`, so we hard-set null (reading it would leave
+  // a stale pip). Idempotent with our own optimistic flip on self-echo.
+  chatSocket.onMessagePinned((p) => {
+    const cache = cacheByChatId.get(p.chatId);
+    if (!cache) return;
+    const at = cache.messages.findIndex((x) => x.id === p.messageId);
+    if (at < 0) return;
+    cache.messages[at] = { ...cache.messages[at]!, pinnedAt: p.pinnedAt } as Message;
+    notify();
+  });
+  chatSocket.onMessageUnpinned((p) => {
+    const cache = cacheByChatId.get(p.chatId);
+    if (!cache) return;
+    const at = cache.messages.findIndex((x) => x.id === p.messageId);
+    if (at < 0) return;
+    cache.messages[at] = { ...cache.messages[at]!, pinnedAt: null } as Message;
     notify();
   });
 
@@ -774,6 +804,43 @@ export const apiChatRepository: ChatRepository = {
       body,
     );
     return { delivered: res.items.length, skipped: res.skipped.length };
+  },
+
+  /**
+   * Pin / unpin a message. Optimistic single-field flip of `pinnedAt` (mirrors
+   * the delete tombstone path) — the server returns the durable `MessageDto`
+   * which we reconcile (single field only, so an in-flight optimistic media row
+   * isn't clobbered). On failure we restore the EXACT prior `pinnedAt` (not a
+   * hardcoded null) and rethrow so the screen can branch on
+   * `ApiError.code === 'pin_cap_exceeded'`. The server's `message:pinned`
+   * broadcast lands shortly after and re-applies the same value (idempotent).
+   */
+  async pinMessage(threadId, messageId) {
+    const prev = locateMessage(messageId)?.message.pinnedAt ?? null;
+    setPinnedAt(messageId, new Date().toISOString());
+    try {
+      const dto = await apiClient.patch<MessageDto>(
+        `/chats/${threadId}/messages/${messageId}/pin`,
+      );
+      setPinnedAt(messageId, dto.pinnedAt ?? null);
+    } catch (err) {
+      setPinnedAt(messageId, prev);
+      throw err;
+    }
+  },
+
+  async unpinMessage(threadId, messageId) {
+    const prev = locateMessage(messageId)?.message.pinnedAt ?? null;
+    setPinnedAt(messageId, null);
+    try {
+      const dto = await apiClient.del<MessageDto>(
+        `/chats/${threadId}/messages/${messageId}/pin`,
+      );
+      setPinnedAt(messageId, dto.pinnedAt ?? null);
+    } catch (err) {
+      setPinnedAt(messageId, prev);
+      throw err;
+    }
   },
 
   async getProfileCard(userId) {

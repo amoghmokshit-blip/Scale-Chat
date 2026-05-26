@@ -2,6 +2,8 @@ import Constants from 'expo-constants';
 import {
   type MessageDto,
   type SocketMessageDeleted,
+  type SocketMessagePinned,
+  type SocketMessageUnpinned,
   type SocketMessageSendAck,
   type SocketMessageSendPayload,
   type SocketPresenceUpdate,
@@ -39,6 +41,8 @@ type Listeners = {
   typing: Set<(t: SocketTypingUpdate) => void>;
   presence: Set<(p: SocketPresenceUpdate) => void>;
   reactionUpdated: Set<(r: SocketReactionUpdated) => void>;
+  messagePinned: Set<(p: SocketMessagePinned) => void>;
+  messageUnpinned: Set<(p: SocketMessageUnpinned) => void>;
   connectionChange: Set<(connected: boolean) => void>;
 };
 
@@ -59,6 +63,8 @@ class ChatSocketManager {
     typing: new Set(),
     presence: new Set(),
     reactionUpdated: new Set(),
+    messagePinned: new Set(),
+    messageUnpinned: new Set(),
     connectionChange: new Set(),
   };
 
@@ -229,6 +235,16 @@ class ChatSocketManager {
     return () => this.listeners.reactionUpdated.delete(listener);
   }
 
+  onMessagePinned(listener: (p: SocketMessagePinned) => void): () => void {
+    this.listeners.messagePinned.add(listener);
+    return () => this.listeners.messagePinned.delete(listener);
+  }
+
+  onMessageUnpinned(listener: (p: SocketMessageUnpinned) => void): () => void {
+    this.listeners.messageUnpinned.add(listener);
+    return () => this.listeners.messageUnpinned.delete(listener);
+  }
+
   onConnectionChange(listener: (connected: boolean) => void): () => void {
     this.listeners.connectionChange.add(listener);
     return () => this.listeners.connectionChange.delete(listener);
@@ -257,6 +273,12 @@ class ChatSocketManager {
     });
     socket.on(SocketEvents.reactionUpdated, (r: SocketReactionUpdated) => {
       this.listeners.reactionUpdated.forEach((l) => l(r));
+    });
+    socket.on(SocketEvents.messagePinned, (p: SocketMessagePinned) => {
+      this.listeners.messagePinned.forEach((l) => l(p));
+    });
+    socket.on(SocketEvents.messageUnpinned, (p: SocketMessageUnpinned) => {
+      this.listeners.messageUnpinned.forEach((l) => l(p));
     });
   }
 

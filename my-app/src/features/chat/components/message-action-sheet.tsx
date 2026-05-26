@@ -27,6 +27,10 @@ type Props = {
   onDelete: () => void;
   /** Forward this message — opens the forward picker (Tranche 2.E). */
   onForward?: () => void;
+  /** Pin / unpin this message (Tranche 2.E). When both are provided a single
+   *  toggle row renders (Pin when not pinned, Unpin when pinned). */
+  onPin?: () => void;
+  onUnpin?: () => void;
   /** When provided, a "Report" row is shown on counterpart bubbles (non-tombstones). */
   onReport?: () => void;
   /**
@@ -61,6 +65,8 @@ export function MessageActionSheet({
   onDelete,
   onReport,
   onForward,
+  onPin,
+  onUnpin,
   onReact,
   onOpenEmojiPicker,
 }: Props) {
@@ -68,6 +74,13 @@ export function MessageActionSheet({
 
   const isTombstone = message.deletedAt != null;
   const isText = message.type === 'text';
+  // Pin/Unpin + Forward act on the DURABLE server row. An optimistic row's id
+  // is still its `clientMessageId` until the send is acked, so hitting
+  // `/messages/{clientMessageId}/pin|forward` would 404 — gate on a settled
+  // status.
+  const isDurable =
+    message.status === 'sent' || message.status === 'delivered' || message.status === 'read';
+  const isPinned = message.pinnedAt != null;
   // The viewer's own emoji on this message (if any) — used to highlight the
   // matching quick-chip in the strip. There can only be one because the
   // server enforces unique `(messageId, userId, emoji)` per-emoji and we
@@ -78,7 +91,14 @@ export function MessageActionSheet({
   const actions: Action[] = [];
   if (!isTombstone) {
     actions.push({ key: 'reply', label: 'Reply', icon: 'corner-up-left', onPress: onReply });
-    if (onForward) {
+    if (isDurable && onPin && onUnpin) {
+      actions.push(
+        isPinned
+          ? { key: 'unpin', label: ChatCopy.pin.unpin, icon: 'bookmark', onPress: onUnpin }
+          : { key: 'pin', label: ChatCopy.pin.pin, icon: 'bookmark', onPress: onPin },
+      );
+    }
+    if (isDurable && onForward) {
       actions.push({
         key: 'forward',
         label: ChatCopy.forward.action,

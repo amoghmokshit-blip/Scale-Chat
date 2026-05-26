@@ -59,7 +59,9 @@ export const SEED_MESSAGES: Record<string, Message[]> = {
       // Mine side (purple bubble, white-alpha label).
       type: 'text', text: 'Sure. Ping me.', forwardedFromMessageId: 'seed-fwd-src-2' },
     { id: 'm9', threadId: 't-naman', senderId: 'c-naman', sequence: 9, createdAt: minutesAgo(3), status: 'read',
-      type: 'text', text: 'Done !' },
+      // Seeded pinned message (Tranche 2.E-front-pin) so the bubble pin pip
+      // shows on a fresh mock load — counterpart side (leading pip).
+      type: 'text', text: 'Done !', pinnedAt: minutesAgo(2) },
   ],
   't-megha': [
     { id: 'm1', threadId: 't-megha', senderId: 'c-megha', sequence: 1, createdAt: hoursAgo(2), status: 'read',

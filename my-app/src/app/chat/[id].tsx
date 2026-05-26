@@ -31,8 +31,11 @@ import { MutePickerSheet } from '@/features/chat/components/mute-picker-sheet';
 import { PerChatOptionsSheet } from '@/features/chat/components/per-chat-options-sheet';
 import { VoiceRecorderOverlay } from '@/features/chat/components/voice-recorder-overlay';
 import { ChatCopy } from '@/features/chat/copy';
+import { MAX_PINNED_PER_CHAT } from '@scalechat/shared';
+
 import { useThread } from '@/features/chat/hooks/use-thread';
 import { chatRepository } from '@/features/chat/data';
+import { ApiError } from '@/lib/api-client';
 import { formatDayLabel } from '@/lib/format-time';
 
 import type { Message } from '@/features/chat/types';
@@ -238,6 +241,36 @@ export default function ChatThreadScreen() {
     }
   }
 
+  async function handlePin() {
+    const m = sheetMessage;
+    setSheetMessage(null);
+    if (!m || !id) return;
+    const fn = chatRepository.pinMessage;
+    if (!fn) return;
+    try {
+      await fn.call(chatRepository, id, m.id);
+    } catch (err) {
+      if (err instanceof ApiError && err.code === 'pin_cap_exceeded') {
+        Alert.alert(ChatCopy.pin.capTitle, ChatCopy.pin.capBody(MAX_PINNED_PER_CHAT));
+      } else {
+        Alert.alert(ChatCopy.pin.failTitle, ChatCopy.pin.failBody);
+      }
+    }
+  }
+
+  async function handleUnpin() {
+    const m = sheetMessage;
+    setSheetMessage(null);
+    if (!m || !id) return;
+    const fn = chatRepository.unpinMessage;
+    if (!fn) return;
+    try {
+      await fn.call(chatRepository, id, m.id);
+    } catch {
+      Alert.alert(ChatCopy.pin.failTitle, ChatCopy.pin.failBody);
+    }
+  }
+
   async function handleDelete() {
     if (!sheetMessage) return;
     try {
@@ -362,6 +395,8 @@ export default function ChatThreadScreen() {
         }}
         onDelete={handleDelete}
         onForward={handleForward}
+        onPin={handlePin}
+        onUnpin={handleUnpin}
         onReport={() => {
           // Open the reason picker after the action sheet closes itself.
           const m = sheetMessage;

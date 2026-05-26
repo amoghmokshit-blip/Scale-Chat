@@ -1,3 +1,6 @@
+import { MAX_PINNED_PER_CHAT } from '@scalechat/shared';
+
+import { ApiError } from '@/lib/api-client';
 import { StorageKeys, getJson, setJson } from '@/lib/mmkv';
 
 import type { Message, Thread } from '../types';
@@ -331,6 +334,50 @@ export const mockChatRepository: ChatRepository = {
     }
     persist();
     return { delivered, skipped };
+  },
+
+  // Pin / unpin (Tranche 2.E). Flips `pinnedAt` in place (immutable splice) +
+  // persist() so the open thread's bubble pip updates offline. The mock fakes
+  // the server's 3-pin cap so the cap → rollback → Alert path is exercisable on
+  // the emulator (real cap lives server-side; mock has no socket to echo).
+  async pinMessage(threadId, messageId) {
+    await sleep();
+    const s = getState();
+    const list = s.messagesByThread[threadId];
+    if (!list) return;
+    const at = list.findIndex((m) => m.id === messageId);
+    if (at < 0) return;
+    const msg = list[at]!;
+    if (msg.pinnedAt) return; // already pinned — idempotent
+    const pinnedCount = list.filter((m) => m.pinnedAt != null && m.deletedAt == null).length;
+    if (pinnedCount >= MAX_PINNED_PER_CHAT) {
+      throw new ApiError(409, {
+        code: 'pin_cap_exceeded',
+        message: `You've pinned the maximum of ${MAX_PINNED_PER_CHAT} messages.`,
+      });
+    }
+    s.messagesByThread[threadId] = [
+      ...list.slice(0, at),
+      { ...msg, pinnedAt: new Date().toISOString() } as Message,
+      ...list.slice(at + 1),
+    ];
+    persist();
+  },
+
+  async unpinMessage(threadId, messageId) {
+    await sleep();
+    const s = getState();
+    const list = s.messagesByThread[threadId];
+    if (!list) return;
+    const at = list.findIndex((m) => m.id === messageId);
+    if (at < 0) return;
+    const msg = list[at]!;
+    s.messagesByThread[threadId] = [
+      ...list.slice(0, at),
+      { ...msg, pinnedAt: null } as Message,
+      ...list.slice(at + 1),
+    ];
+    persist();
   },
 
   async markThreadRead(threadId) {

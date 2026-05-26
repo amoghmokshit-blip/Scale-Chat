@@ -47,6 +47,22 @@ export const ChatCopy = {
     empty: 'No other chats to forward to',
   },
 
+  /** Pin (Tranche 2.E). */
+  pin: {
+    pin: 'Pin',
+    unpin: 'Unpin',
+    /** Shown when the chat already has the max pinned messages (409). */
+    capTitle: 'Pin limit reached',
+    // No "unpin one first" — without a pinned-strip the user can't see which
+    // are pinned, so directing them to unpin would be a dead-end. `max` is the
+    // server cap (`MAX_PINNED_PER_CHAT`), passed by the caller — keeping the
+    // shared constant out of this file so the Jest graph never runtime-requires
+    // `@scalechat/shared` (which Jest maps to TS source with `.js` specifiers).
+    capBody: (max: number) => `You've pinned the maximum of ${max} messages.`,
+    failTitle: 'Could not pin',
+    failBody: 'Please try again.',
+  },
+
   attachments: {
     title: 'Share',
     camera: 'Camera',
