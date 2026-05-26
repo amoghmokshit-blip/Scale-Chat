@@ -1,5 +1,6 @@
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
+import * as Location from 'expo-location';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import {
@@ -83,6 +84,7 @@ export default function ChatThreadScreen() {
     sendVoice,
     sendDocument,
     sendVideo,
+    sendLocation,
     loading,
     loadOlder,
     loadingOlder,
@@ -384,6 +386,54 @@ export default function ChatThreadScreen() {
     });
   }
 
+  async function handlePickLocation() {
+    // Privacy: confirm before reading + sharing precise current GPS (one-tap share is a footgun).
+    const confirmed = await new Promise<boolean>((resolve) => {
+      Alert.alert(ChatCopy.location.confirmTitle, ChatCopy.location.confirmBody, [
+        { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+        { text: ChatCopy.location.confirmCta, onPress: () => resolve(true) },
+      ]);
+    });
+    if (!confirmed) return;
+
+    const perm = await Location.requestForegroundPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert('Location', ChatCopy.location.permissionDenied);
+      return;
+    }
+    // getCurrentPositionAsync can hang on an AVD with no set location → race a
+    // timeout, then fall back to the last-known fix; never freeze the UI.
+    let pos: Location.LocationObject | null = null;
+    try {
+      pos = await withTimeout(
+        Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+        8000,
+      );
+    } catch {
+      pos = await Location.getLastKnownPositionAsync().catch(() => null);
+    }
+    if (!pos) {
+      Alert.alert('Location', ChatCopy.location.unavailable);
+      return;
+    }
+    const { latitude, longitude } = pos.coords;
+    let locationName: string | undefined;
+    try {
+      const places = await Location.reverseGeocodeAsync({ latitude, longitude });
+      const p = places[0];
+      // Omit (undefined) when blank — the server rejects an empty locationName.
+      locationName = (p?.city ?? p?.district ?? p?.name ?? p?.region) || undefined;
+    } catch {
+      // best-effort — a coords-only card is fine.
+    }
+    await sendLocation({ latitude, longitude, locationName });
+  }
+
+  function handlePickContact() {
+    if (!id) return;
+    router.push({ pathname: '/chat/pick-contact', params: { threadId: id } });
+  }
+
   if (loading || !thread) {
     return (
       <View style={styles.root}>
@@ -496,6 +546,8 @@ export default function ChatThreadScreen() {
         onPickCamera={() => void handlePickImage('camera')}
         onPickGallery={() => void handlePickImage('gallery')}
         onPickDocument={() => void handlePickDocument()}
+        onPickContact={handlePickContact}
+        onPickLocation={() => void handlePickLocation()}
       />
 
       <VoiceRecorderOverlay
@@ -621,6 +673,15 @@ export default function ChatThreadScreen() {
   );
 }
 
+
+/** Race a promise against a timeout (ms) — used so `getCurrentPositionAsync`
+ *  can't hang the UI on an emulator with no location fix (Tranche 2.D). */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
+  ]);
+}
 
 /** Friendly Alert body for a rejected media pick (Tranche 2.C guard). */
 function mediaRejectBody(reason: 'unsupported_type' | 'empty' | 'too_large', maxBytes: number): string {

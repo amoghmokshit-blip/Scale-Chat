@@ -164,7 +164,7 @@ export const mockChatRepository: ChatRepository = {
         sizeBytes: input.sizeBytes,
         mimeType: input.mimeType,
       };
-    } else {
+    } else if (input.type === 'video') {
       msg = {
         ...base,
         type: 'video',
@@ -172,6 +172,21 @@ export const mockChatRepository: ChatRepository = {
         width: input.width,
         height: input.height,
         durationSec: input.durationSec,
+      };
+    } else if (input.type === 'location') {
+      msg = {
+        ...base,
+        type: 'location',
+        latitude: input.latitude,
+        longitude: input.longitude,
+        locationName: input.locationName ?? null,
+      };
+    } else {
+      msg = {
+        ...base,
+        type: 'contact',
+        contactName: input.contactName,
+        contactPhoneE164: input.contactPhoneE164,
       };
     }
 
@@ -208,7 +223,11 @@ export const mockChatRepository: ChatRepository = {
             ? { mediaUrl: '', fileName: '', sizeBytes: 0, mimeType: '' }
             : prev.type === 'video'
               ? { mediaUrl: '', width: 0, height: 0, durationSec: 0 }
-              : { mediaUrl: '', width: 0, height: 0 }),
+              : prev.type === 'location'
+                ? { latitude: 0, longitude: 0, locationName: null }
+                : prev.type === 'contact'
+                  ? { contactName: '', contactPhoneE164: '' }
+                  : { mediaUrl: '', width: 0, height: 0 }),
     } as Message;
     s.messagesByThread[threadId] = [...list.slice(0, at), tombstone, ...list.slice(at + 1)];
     persist();

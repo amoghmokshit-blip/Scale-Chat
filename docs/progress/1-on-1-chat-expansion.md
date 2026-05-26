@@ -141,7 +141,7 @@ These items are an executable checklist — when the gating tranche begins, the 
 | **2.H** | Calls signalling (server) | `CallSession` table + 100ms-or-LiveKit-Cloud client + ring/accept/decline/hangup REST + webhook + **`user:{userId}` socket room** + **BullMQ ring-timeout** | ✅ | none | C | 2.B + POC complete |
 | **2.I** | Call UI + push wakeup + **EAS migration** | `UserDevice` table + push module + CallScreen + IncomingCallScreen + provider SDK install + **first tranche to require EAS Build** (push wakeup + calls can't be tested on emulator alone) | ✅ | ✅ | D | 2.H + EAS + Apple Dev account |
 | **2.C** | Document + Video kinds | ✅ **LANDED 2026-05-25**. Combined Gallery (photos+videos) + Document picker + DocumentBubble + VideoBubble + full-screen VideoViewer; client `validateMediaPick` guard; first native-dep prebuild (expo-document-picker + expo-video). +2 VIDEO e2e (33 green), +18 mobile tests (71). | ✅ (extends 2.B) | ✅ | — | 2.B |
-| **2.D** | Location + Contact-card kinds | static-map bubble + vCard-style bubble + map picker | (extends 2.B) | ✅ | — | 2.B |
+| **2.D** | Location + Contact-card kinds | ✅ **LANDED 2026-05-25**. Coords/place-name LocationCard tile (expo-location, no maps API key) + privacy confirm; ContactCard via InfoCardBubble + `chat/pick-contact.tsx` (expo-contacts/legacy, toE164Loose). One native-dep prebuild (expo-location). +6 mobile tests (77); no new e2e. | ✅ (extends 2.B) | ✅ | — | 2.B |
 | **2.F** | Polls (1-on-1) | PollMessage/PollOption/PollVote tables + module + bubble + composer | ✅ | ✅ | B | 2.B |
 | ~~**2.G**~~ | ~~Scheduled-send~~ | **Deferred to v1.1 BRD per R2.** | — | — | — | — |
 
@@ -356,62 +356,38 @@ npm install expo-document-picker expo-video expo-build-properties
 
 ---
 
-## Tranche 2.D — Location + Contact-card message kinds
+## Tranche 2.D — Location + Contact-card message kinds — ✅ LANDED 2026-05-25
 
-### Status table
+Reshaped by a 5-agent review (this supersedes the original react-native-maps / static-map / server-`locationPreviewUrl` sketch — **all abandoned**). Both kinds are **non-media** (no R2 upload). **QA'd on the Android emulator** (mock, rebuilt client): both cards render + coexist with the 2.C bubbles; chat-list previews; attach sheet shows Contact + Location enabled; the Location privacy-confirm Alert fires.
+
+### Status table (as shipped)
 
 | Sub-item | Frontend | Backend | Notes |
 |---|---|---|---|
-| **D.1** AttachSheet — Location tile wired | 🚫 | n/a | Remove `disabled` from line 79; open `pick-location.tsx` modal |
-| **D.2** Map picker screen | 🚫 | n/a | `<MapView>` from `react-native-maps`, draggable marker, "Send location" CTA |
-| **D.3** Location bubble (static map preview) | 🚫 | n/a | Server-emitted static-map URL; tap → full-screen `<MapView>` |
-| **D.4** AttachSheet — Contact tile wired | 🚫 | n/a | Remove `disabled` from line 72 |
-| **D.5** Contact picker | 🚫 | n/a | iOS: `Contacts.presentContactPickerAsync()`; Android: custom list at `pick-contact.tsx` |
-| **D.6** Contact-card bubble | 🚫 | n/a | Avatar + name + phone + "Save to Contacts" CTA |
-| **D.7** Static-map preview URL emission | n/a | 🚫 | Server pre-signs Google Static Maps URL in MessageDto for LOCATION rows |
+| **D.1** AttachSheet — Location + Contact tiles wired | ✅ | n/a | Both un-disabled; `onPickLocation`/`onPickContact` props. |
+| **D.2** Location handler | ✅ | n/a | `[id].tsx handlePickLocation`: **privacy confirm** → `expo-location` permission → `getCurrentPositionAsync` (raced against a timeout + `getLastKnownPositionAsync` fallback — no AVD hang) → best-effort `reverseGeocodeAsync` (omit blank name; server `min(1)`). |
+| **D.3** `LocationCard` | ✅ | n/a | A deliberate **tile** (faux-map `expo-linear-gradient` band + pin + place name + "Open in Maps"). **No react-native-maps / no Maps API key** (dummy-key path crashes the AVD). Tap → universal `https://www.google.com/maps/search/?api=1&query=…` (not the iOS-broken `geo:`). |
+| **D.4** `chat/pick-contact.tsx` | ✅ | n/a | Modal route (forward.tsx scaffold). `expo-contacts/legacy` (root throws in SDK 56), searchable list, per-row sendability via `toE164Loose` (libphonenumber-js — NOT the India-only `toE164India`), unsendable rows **disabled**, name fallback + ≤120 truncate. Sends via the repo directly (no `useThread`). |
+| **D.5** `ContactCard` | ✅ | n/a | Reuses the new `InfoCardBubble` (person icon + name + **formatted** number, not raw E.164); tap → `tel:`. |
+| ~~**D.6** Static-map preview URL emission~~ | — | ✂️ CUT | Needs a Google Static Maps API key; deferred with react-native-maps. The coords/place-name tile needs no server change. |
 
-### Files touched
+### Reuse + shared
 
-**Frontend (`my-app/`)**
+- **`InfoCardBubble`** (NEW) — shared row-card primitive (icon + title + subtitle + tap); `DocumentBubble` migrated onto it + ContactCard uses it (per-side colors centralized, was hard-coded in 2.C). LocationCard is bespoke (a tile, not a row).
+- **`lib/phone.ts` `toE164Loose`** (NEW) — gated on the server E.164 regex; preserves already-international numbers, defaults bare numbers to IN. `lib/media-pick.ts` patterns reused conceptually.
+- Send-path: `api`+`mock` `sendMessage` got explicit location/contact arms BEFORE the trailing VIDEO `else` (the 3-site `!== 'text'` trap); `tombstoneContent` per-kind arms.
 
-- `src/app/chat/[id]/pick-location.tsx` — NEW (modal route).
-- `src/app/chat/[id]/pick-contact.tsx` — NEW (Android list); iOS shortcircuits to native picker.
-- `src/app/chat/[id]/view-location.tsx` — NEW (full-screen map view modal).
-- `src/app/chat/[id]/_layout.tsx` — NEW. Declares new modal routes with `presentation: 'modal'`.
-- `src/features/chat/components/bubbles/location-bubble.tsx` — NEW.
-- `src/features/chat/components/bubbles/contact-card-bubble.tsx` — NEW.
-- `src/features/chat/components/attachment-sheet.tsx` — EDIT. Remove `disabled` from Location + Contact tiles.
-
-**Backend** — None for static location; column persistence already lands in Tranche 2.B. The static-map preview URL can be computed at MessageDto-serialize time:
-
-```ts
-// apps/api/src/modules/messages/messages.service.ts (in rowToDto)
-if (row.kind === 'LOCATION') {
-  dto.locationPreviewUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${row.latitude},${row.longitude}&zoom=15&size=480x280&markers=color:0x6B5BFF%7C${row.latitude},${row.longitude}&key=${env.GOOGLE_STATIC_MAPS_KEY}`;
-}
-```
-
-(Optional — clients can also render the static preview themselves. Server-side keeps the API key out of the bundle.)
-
-### Dependencies to install
+### Native deps
 
 ```bash
-npm --workspace=my-app install expo-contacts expo-location react-native-maps
+npm install expo-location   # from repo ROOT (K11) — ONLY new native dep; expo-contacts already installed (PR 6)
 ```
+app.json: `["expo-location", { "locationWhenInUsePermission": "…" }]` (foreground only). MultiDex moot (minSdk 24). Prebuild + `dev:android` rebuilt the client; booted with expo-location (Step-0 gate passed).
 
-### `app.json` plugin additions
+### Tests
 
-```json
-[
-  "expo-contacts",
-  { "contactsPermission": "ScaleChat needs contacts access so you can share a contact in chats." }
-],
-[
-  "expo-location",
-  { "locationWhenInUsePermission": "ScaleChat needs your location to share it in chats." }
-],
-"react-native-maps"
-```
+- No new backend e2e (2.B's LOCATION + CONTACT_CARD happy + 400 cases cover the contract; 2.D ships no backend code).
+- Mobile: `dto-to-message` LOCATION/CONTACT_CARD round-trip + `toE164Loose` unit tests. **77 mobile Jest green** (+6).
 
 Plus `android.config.googleMaps.apiKey` + `ios.config.googleMapsApiKey` (or fallback to Apple Maps on iOS — decide per Open Question Q7).
 

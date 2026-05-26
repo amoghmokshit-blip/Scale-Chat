@@ -140,6 +140,10 @@ function tombstoneContent(prev: Message): Partial<Message> {
       return { mediaUrl: '', fileName: '', sizeBytes: 0, mimeType: '' };
     case 'video':
       return { mediaUrl: '', width: 0, height: 0, durationSec: 0 };
+    case 'location':
+      return { latitude: 0, longitude: 0, locationName: null };
+    case 'contact':
+      return { contactName: '', contactPhoneE164: '' };
     default:
       return { mediaUrl: '', width: 0, height: 0 };
   }
@@ -573,7 +577,9 @@ export const apiChatRepository: ChatRepository = {
     //    media we start in `uploading` and flip to `sending` once the R2 PUT
     //    completes. The id IS the clientMessageId so reconciliation by id
     //    Just Works when the durable row comes back.
-    const isMedia = input.type !== 'text';
+    // location + contact are non-media (like text): no R2 upload, status `sending`.
+    const isMedia =
+      input.type !== 'text' && input.type !== 'location' && input.type !== 'contact';
     const optimisticBase = {
       id: input.clientMessageId,
       threadId: input.threadId,
@@ -613,7 +619,7 @@ export const apiChatRepository: ChatRepository = {
         sizeBytes: input.sizeBytes,
         mimeType: input.mimeType,
       };
-    } else {
+    } else if (input.type === 'video') {
       optimistic = {
         ...optimisticBase,
         type: 'video',
@@ -621,6 +627,21 @@ export const apiChatRepository: ChatRepository = {
         width: input.width,
         height: input.height,
         durationSec: input.durationSec,
+      };
+    } else if (input.type === 'location') {
+      optimistic = {
+        ...optimisticBase,
+        type: 'location',
+        latitude: input.latitude,
+        longitude: input.longitude,
+        locationName: input.locationName ?? null,
+      };
+    } else {
+      optimistic = {
+        ...optimisticBase,
+        type: 'contact',
+        contactName: input.contactName,
+        contactPhoneE164: input.contactPhoneE164,
       };
     }
     upsertMessage(input.threadId, optimistic);
@@ -631,7 +652,7 @@ export const apiChatRepository: ChatRepository = {
     //    (their server validators reject a 0 size / non-allowlisted MIME), so
     //    they NEVER use the `fileSize(uri)` 0-stat fallback that IMAGE/VOICE do.
     let mediaObjectKey: string | undefined;
-    if (input.type !== 'text') {
+    if (isMedia) {
       try {
         const contentType =
           input.type === 'image'
@@ -711,7 +732,7 @@ export const apiChatRepository: ChatRepository = {
         documentSizeBytes: input.sizeBytes,
         replyToMessageId: input.replyToMessageId,
       };
-    } else {
+    } else if (input.type === 'video') {
       body = {
         clientMessageId: input.clientMessageId,
         kind: 'VIDEO',
@@ -720,6 +741,24 @@ export const apiChatRepository: ChatRepository = {
         videoDurationSec: input.durationSec,
         videoWidth: input.width,
         videoHeight: input.height,
+        replyToMessageId: input.replyToMessageId,
+      };
+    } else if (input.type === 'location') {
+      body = {
+        clientMessageId: input.clientMessageId,
+        kind: 'LOCATION',
+        latitude: input.latitude,
+        longitude: input.longitude,
+        // Omit locationName entirely when blank — the server rejects an empty string.
+        ...(input.locationName ? { locationName: input.locationName } : {}),
+        replyToMessageId: input.replyToMessageId,
+      };
+    } else {
+      body = {
+        clientMessageId: input.clientMessageId,
+        kind: 'CONTACT_CARD',
+        contactName: input.contactName,
+        contactPhoneE164: input.contactPhoneE164,
         replyToMessageId: input.replyToMessageId,
       };
     }

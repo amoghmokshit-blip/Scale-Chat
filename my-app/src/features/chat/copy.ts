@@ -86,6 +86,29 @@ export const ChatCopy = {
     documentLabel: 'Document',
   },
 
+  /** Location (Tranche 2.D). */
+  location: {
+    /** Confirm before sharing precise current GPS (privacy-first). */
+    confirmTitle: 'Share your location?',
+    confirmBody: 'Your current location will be sent in this chat.',
+    confirmCta: 'Share location',
+    permissionDenied: 'Location permission is needed to share where you are. Enable it in Settings.',
+    unavailable: 'Couldn’t get your location. Make sure location is on and try again.',
+    bubbleFallback: 'Location',
+    openInMaps: 'Open in Maps',
+  },
+
+  /** Contact card (Tranche 2.D). */
+  contact: {
+    pickerTitle: 'Share a contact',
+    searchPlaceholder: 'Search contacts',
+    permissionDenied: 'Contacts permission is needed to share a contact. Enable it in Settings.',
+    grantCta: 'Allow access to contacts',
+    empty: 'No contacts found',
+    noNumber: 'No number',
+    bubbleFallback: 'Contact',
+  },
+
   recorder: {
     recording: 'Recording…',
     holdToRecord: 'Tap send to share when ready',

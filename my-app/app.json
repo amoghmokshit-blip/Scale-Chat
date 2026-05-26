@@ -56,7 +56,13 @@
         }
       ],
       "expo-video",
-      "expo-build-properties"
+      "expo-build-properties",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "ScaleChat needs your location to share where you are in a chat."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

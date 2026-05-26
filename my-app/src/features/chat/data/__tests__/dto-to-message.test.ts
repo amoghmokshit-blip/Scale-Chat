@@ -216,6 +216,31 @@ describe('dtoToMessage — DOCUMENT + VIDEO (Tranche 2.C)', () => {
   });
 });
 
+describe('dtoToMessage — LOCATION + CONTACT_CARD (Tranche 2.D)', () => {
+  it('maps a LOCATION message', () => {
+    const dto = makeDto({ kind: 'LOCATION', text: null, latitude: 19.076, longitude: 72.8777, locationName: 'Mumbai' });
+    const m = dtoToMessage(dto, COUNTERPART_ID) as Extract<ReturnType<typeof dtoToMessage>, { type: 'location' }>;
+    expect(m.type).toBe('location');
+    expect(m.latitude).toBe(19.076);
+    expect(m.longitude).toBe(72.8777);
+    expect(m.locationName).toBe('Mumbai');
+  });
+
+  it('maps a LOCATION with no name (null)', () => {
+    const dto = makeDto({ kind: 'LOCATION', text: null, latitude: 1, longitude: 2, locationName: null });
+    const m = dtoToMessage(dto, COUNTERPART_ID) as Extract<ReturnType<typeof dtoToMessage>, { type: 'location' }>;
+    expect(m.locationName).toBeNull();
+  });
+
+  it('maps a CONTACT_CARD message', () => {
+    const dto = makeDto({ kind: 'CONTACT_CARD', text: null, contactName: 'Priya', contactPhoneE164: '+919620304050' });
+    const m = dtoToMessage(dto, COUNTERPART_ID) as Extract<ReturnType<typeof dtoToMessage>, { type: 'contact' }>;
+    expect(m.type).toBe('contact');
+    expect(m.contactName).toBe('Priya');
+    expect(m.contactPhoneE164).toBe('+919620304050');
+  });
+});
+
 describe('dtoToMessage — senderId resolution', () => {
   it("returns 'me' when senderUserId !== counterpartId regardless of which 'me' actually is", () => {
     // The repo resolves any non-counterpart sender to 'me'. This is a deliberate

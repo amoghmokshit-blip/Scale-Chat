@@ -73,5 +73,22 @@ export function dtoToMessage(m: MessageDto, counterpartId: string): Message {
       durationSec: m.videoDurationSec ?? 0,
     };
   }
+  if (m.kind === 'LOCATION') {
+    return {
+      ...base,
+      type: 'location',
+      latitude: m.latitude ?? 0,
+      longitude: m.longitude ?? 0,
+      locationName: m.locationName ?? null,
+    };
+  }
+  if (m.kind === 'CONTACT_CARD') {
+    return {
+      ...base,
+      type: 'contact',
+      contactName: m.contactName ?? '',
+      contactPhoneE164: m.contactPhoneE164 ?? '',
+    };
+  }
   return { ...base, type: 'text', text: m.text ?? '' };
 }

@@ -59,3 +59,22 @@ export function localDigitsFromE164(e164: string): string {
   if (e164.startsWith('+91')) return e164.slice(3);
   return digitsOnly(e164);
 }
+
+/** The server's CONTACT_CARD E.164 contract (`packages/shared` messages.ts). */
+const E164_RE = /^\+[1-9]\d{7,14}$/;
+
+/**
+ * Normalize an arbitrary device-contact phone string to E.164, or null if it
+ * can't be made valid. Unlike `toE164India` this is NOT India-only: a bare
+ * local number defaults to the IN region (→ `+91…`), but an already-
+ * international number (`+1…`, `+44…`) is preserved. Used by the CONTACT_CARD
+ * picker — gated on the server's E.164 regex so we never send a number the
+ * backend validator would reject with 400. (`toE164India` is intentionally
+ * stricter — Indian mobiles only — so it must NOT be used here.)
+ */
+export function toE164Loose(raw: string): string | null {
+  const parsed = parsePhoneNumberFromString(raw, IN_REGION);
+  if (!parsed || !parsed.isValid()) return null;
+  const e164 = parsed.number;
+  return E164_RE.test(e164) ? e164 : null;
+}

@@ -28,17 +28,27 @@ type Props = {
   onPickGallery: () => void;
   /** Document picker (Tranche 2.C). */
   onPickDocument: () => void;
+  /** Contact + Location pickers (Tranche 2.D). */
+  onPickContact: () => void;
+  onPickLocation: () => void;
 };
 
 /**
  * Attachment panel — Figma 1:3098.
  *
  * Slides up from the bottom over a dimmed backdrop. 3-column grid: Camera,
- * Gallery (photos + videos), Document, Contact, Location. Camera / Gallery /
- * Document are wired; Contact / Location are visible-but-disabled (future
- * tranches 2.D).
+ * Gallery (photos + videos), Document, Contact, Location — all wired
+ * (Tranche 2.D un-disabled Contact + Location).
  */
-export function AttachmentSheet({ visible, onClose, onPickCamera, onPickGallery, onPickDocument }: Props) {
+export function AttachmentSheet({
+  visible,
+  onClose,
+  onPickCamera,
+  onPickGallery,
+  onPickDocument,
+  onPickContact,
+  onPickLocation,
+}: Props) {
   const tiles: Tile[] = [
     {
       key: 'camera',
@@ -75,14 +85,20 @@ export function AttachmentSheet({ visible, onClose, onPickCamera, onPickGallery,
       label: ChatCopy.attachments.contact,
       tint: '#34C77A',
       icon: { lib: 'mci', name: 'account' },
-      disabled: true,
+      onPress: () => {
+        onPickContact();
+        onClose();
+      },
     },
     {
       key: 'location',
       label: ChatCopy.attachments.location,
       tint: '#FF9A55',
       icon: { lib: 'feather', name: 'map-pin' },
-      disabled: true,
+      onPress: () => {
+        onPickLocation();
+        onClose();
+      },
     },
   ];
 

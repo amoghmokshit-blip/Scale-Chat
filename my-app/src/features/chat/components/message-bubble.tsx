@@ -7,8 +7,10 @@ import { formatBubbleTime, formatDuration } from '@/lib/format-time';
 
 import { ChatCopy } from '../copy';
 import type { Message } from '../types';
+import { ContactCard } from './contact-card';
 import { DocumentBubble } from './document-bubble';
 import { ImageBubble } from './image-bubble';
+import { LocationCard } from './location-card';
 import { ReactionsPillRow } from './reactions-pill-row';
 import { VideoBubble } from './video-bubble';
 import { VoicePlayer } from './voice-player';
@@ -184,6 +186,10 @@ export function MessageBubble({
           <VoicePlayer message={message} isMine={isMine} />
         ) : message.type === 'document' ? (
           <DocumentBubble message={message} isMine={isMine} />
+        ) : message.type === 'location' ? (
+          <LocationCard message={message} isMine={isMine} />
+        ) : message.type === 'contact' ? (
+          <ContactCard message={message} isMine={isMine} />
         ) : null}
       </Pressable>
       <View
@@ -239,6 +245,12 @@ function replyPreview(replyTarget: Message): string {
   }
   if (replyTarget.type === 'video') {
     return `📹 ${ChatCopy.media.videoLabel}`;
+  }
+  if (replyTarget.type === 'location') {
+    return `📍 ${replyTarget.locationName || ChatCopy.location.bubbleFallback}`;
+  }
+  if (replyTarget.type === 'contact') {
+    return `👤 ${replyTarget.contactName || ChatCopy.contact.bubbleFallback}`;
   }
   return '📷 Photo';
 }

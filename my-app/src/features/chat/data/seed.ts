@@ -70,6 +70,11 @@ export const SEED_MESSAGES: Record<string, Message[]> = {
     { id: 'm11', threadId: 't-naman', senderId: 'me', sequence: 11, createdAt: minutesAgo(1), status: 'delivered',
       type: 'video', width: 1280, height: 720, durationSec: 15,
       mediaUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4' },
+    // Seeded LOCATION + CONTACT_CARD (Tranche 2.D) so both cards render on a fresh mock load.
+    { id: 'm12', threadId: 't-naman', senderId: 'c-naman', sequence: 12, createdAt: minutesAgo(1), status: 'read',
+      type: 'location', latitude: 19.076, longitude: 72.8777, locationName: 'Mumbai' },
+    { id: 'm13', threadId: 't-naman', senderId: 'me', sequence: 13, createdAt: minutesAgo(1), status: 'delivered',
+      type: 'contact', contactName: 'Rohit Mehta', contactPhoneE164: '+919812121212' },
   ],
   't-megha': [
     { id: 'm1', threadId: 't-megha', senderId: 'c-megha', sequence: 1, createdAt: hoursAgo(2), status: 'read',

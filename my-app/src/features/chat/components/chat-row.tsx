@@ -103,6 +103,8 @@ function previewText(thread: Thread): string {
   }
   if (m.type === 'document') return `📄 ${m.fileName || 'Document'}`;
   if (m.type === 'video') return '📹 Video';
+  if (m.type === 'location') return `📍 ${m.locationName || 'Location'}`;
+  if (m.type === 'contact') return `👤 ${m.contactName || 'Contact'}`;
   return '';
 }
 

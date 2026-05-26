@@ -17,6 +17,11 @@ export default function ChatLayout() {
         name="forward"
         options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
       />
+      {/* Contact picker (Tranche 2.D) — same modal-sibling pattern as forward. */}
+      <Stack.Screen
+        name="pick-contact"
+        options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
+      />
     </Stack>
   );
 }

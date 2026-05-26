@@ -65,6 +65,13 @@ export type SendVideoInput = {
   sizeBytes: number;
 };
 
+export type SendLocationInput = {
+  latitude: number;
+  longitude: number;
+  /** Reverse-geocoded name; omitted when unavailable. */
+  locationName?: string;
+};
+
 export function useThread(threadId: string | undefined): {
   thread: Thread | null;
   messages: Message[];
@@ -76,6 +83,7 @@ export function useThread(threadId: string | undefined): {
   sendVoice: (input: SendVoiceInput) => Promise<void>;
   sendDocument: (input: SendDocumentInput) => Promise<void>;
   sendVideo: (input: SendVideoInput) => Promise<void>;
+  sendLocation: (input: SendLocationInput) => Promise<void>;
   loadOlder: () => Promise<void>;
   /** Set the reply target; pass null to clear. */
   replyTo: (message: Message | null) => void;
@@ -299,6 +307,28 @@ export function useThread(threadId: string | undefined): {
     [threadId, replyingTo]
   );
 
+  const sendLocation = useCallback(
+    async (input: SendLocationInput) => {
+      if (!threadId) return;
+      const replyId = replyingTo?.id;
+      setReplyingTo(null);
+      try {
+        await chatRepository.sendMessage({
+          threadId,
+          type: 'location',
+          latitude: input.latitude,
+          longitude: input.longitude,
+          locationName: input.locationName,
+          clientMessageId: newClientMessageId(),
+          replyToMessageId: replyId,
+        });
+      } catch {
+        // Repo already flipped the optimistic row to `failed`.
+      }
+    },
+    [threadId, replyingTo]
+  );
+
   // ─── Load older ────────────────────────────────────────────────────────────
   const loadOlder = useCallback(async () => {
     if (!threadId || loadingOlder || !hasMoreOlder) return;
@@ -361,6 +391,7 @@ export function useThread(threadId: string | undefined): {
     sendVoice,
     sendDocument,
     sendVideo,
+    sendLocation,
     loadOlder,
     replyTo,
     replyingTo,

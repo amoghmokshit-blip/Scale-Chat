@@ -161,7 +161,29 @@ export type VideoMessage = MessageBase & {
   durationSec: number;
 };
 
-export type Message = TextMessage | VoiceMessage | ImageMessage | DocumentMessage | VideoMessage;
+export type LocationMessage = MessageBase & {
+  type: 'location';
+  latitude: number;
+  longitude: number;
+  /** Reverse-geocoded place name (city/area), or null if unavailable. */
+  locationName?: string | null;
+};
+
+export type ContactCardMessage = MessageBase & {
+  type: 'contact';
+  contactName: string;
+  /** E.164 (e.g. +919876543210). */
+  contactPhoneE164: string;
+};
+
+export type Message =
+  | TextMessage
+  | VoiceMessage
+  | ImageMessage
+  | DocumentMessage
+  | VideoMessage
+  | LocationMessage
+  | ContactCardMessage;
 
 export type SendMessageInput =
   | {
@@ -221,6 +243,25 @@ export type SendMessageInput =
       mimeType: string;
       /** Required + positive — the picker supplies it. */
       sizeBytes: number;
+      clientMessageId: string;
+      replyToMessageId?: string;
+    }
+  | {
+      threadId: string;
+      type: 'location';
+      latitude: number;
+      longitude: number;
+      /** Reverse-geocoded name; omitted (not '') when unavailable — server rejects empty. */
+      locationName?: string;
+      clientMessageId: string;
+      replyToMessageId?: string;
+    }
+  | {
+      threadId: string;
+      type: 'contact';
+      contactName: string;
+      /** Already normalized to E.164 before this call. */
+      contactPhoneE164: string;
       clientMessageId: string;
       replyToMessageId?: string;
     };

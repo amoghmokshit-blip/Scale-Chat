@@ -4,6 +4,7 @@ import {
   isValidIndianMobile,
   localDigitsFromE164,
   toE164India,
+  toE164Loose,
 } from '@/lib/phone';
 
 /**
@@ -134,5 +135,23 @@ describe('localDigitsFromE164', () => {
   it('falls back to digit extraction for non-+91 inputs', () => {
     expect(localDigitsFromE164('+15551234567')).toBe('15551234567');
     expect(localDigitsFromE164('9876543210')).toBe('9876543210');
+  });
+});
+
+describe('toE164Loose (CONTACT_CARD normalizer — Tranche 2.D)', () => {
+  it('normalizes a bare Indian mobile to +91 E.164', () => {
+    expect(toE164Loose('9876543210')).toBe('+919876543210');
+    expect(toE164Loose('98765 43210')).toBe('+919876543210');
+    expect(toE164Loose('+91 98765 43210')).toBe('+919876543210');
+  });
+
+  it('preserves an already-international number (NOT India-only)', () => {
+    expect(toE164Loose('+1 415 555 2671')).toBe('+14155552671');
+  });
+
+  it('returns null for junk / unnormalizable input', () => {
+    expect(toE164Loose('12345')).toBeNull();
+    expect(toE164Loose('not a phone')).toBeNull();
+    expect(toE164Loose('')).toBeNull();
   });
 });
