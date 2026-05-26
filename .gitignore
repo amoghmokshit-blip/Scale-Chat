@@ -8,7 +8,10 @@ node_modules
 dist
 *.tsbuildinfo
 coverage
-.idea/workspace.xml
+# Android / Gradle / IDE machine-local artifacts (build cache, SDK path, IDE config)
+.gradle/
+local.properties
+.idea/
 
 # Local dev secrets — keys/PEMs must never be checked in. Generate per-machine
 # with `openssl genpkey -algorithm RSA -out jwt-private.pem -pkeyopt rsa_keygen_bits:2048`.
