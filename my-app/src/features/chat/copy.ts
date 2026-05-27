@@ -209,6 +209,52 @@ export const ChatCopy = {
     error: 'Search failed. Please try again.',
   },
 
+  /** Manage Storage screen (P2-Storage). */
+  storage: {
+    /** Screen header title. */
+    title: 'Manage Storage',
+    /** Sub-label under the total bytes figure. */
+    totalLabel: 'Total storage used',
+    /** Disclaimer under the total card. */
+    disclaimer: 'Sizes shown for media sent after the last app update.',
+    /** Human-readable label for each MessageKind row. */
+    kindLabel: {
+      TEXT: 'Text messages',
+      IMAGE: 'Photos',
+      VOICE: 'Voice notes',
+      VIDEO: 'Videos',
+      DOCUMENT: 'Documents',
+      LOCATION: 'Locations',
+      LOCATION_LIVE: 'Live locations',
+      CONTACT_CARD: 'Contacts',
+      POLL: 'Polls',
+      CALL_EVENT: 'Call events',
+      SYSTEM: 'System',
+    } as Record<string, string>,
+    /** "N items" / "1 item" count sub-label. */
+    itemCount: (n: number) => `${n} ${n === 1 ? 'item' : 'items'}`,
+    /** Empty-state body (no messages yet). */
+    empty: 'No messages in this chat yet.',
+    /** Generic network / fetch error. */
+    error: 'Could not load storage info.',
+    /** Shown when the screen is opened without a chatId param. */
+    noChatId: 'No chat id provided.',
+    /** "Free up space" button label (also used as accessibilityLabel). */
+    freeUpSpace: 'Free up space',
+    /** Alert shown when the user taps "Free up space". */
+    freeUpAlert: {
+      title: 'Free up space',
+      body: 'This will clear locally cached media for this chat. The files will still be available to download again.',
+      clearCache: 'Clear cache',
+      cancel: 'Cancel',
+    },
+    /** Alert shown after the stub clear completes. */
+    doneAlert: {
+      title: 'Done',
+      body: 'Local cache cleared for this chat.',
+    },
+  },
+
   /** Voice/Video call UI (Tranche 2.I). */
   calls: {
     incomingVoice: 'Incoming voice call',

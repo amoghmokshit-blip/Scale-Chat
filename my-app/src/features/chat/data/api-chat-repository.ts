@@ -825,7 +825,9 @@ export const apiChatRepository: ChatRepository = {
         replyToMessageId: input.replyToMessageId,
         // documentSizeBytes and mediaSizeBytes carry the same value for DOCUMENTs;
         // both are sent so older backend versions still see documentSizeBytes.
-        mediaSizeBytes: input.sizeBytes,
+        // uploadedSizeBytes === input.sizeBytes here (step 2 assigns it from input.sizeBytes
+        // for doc/video), so using the hoisted variable keeps all media kinds consistent.
+        mediaSizeBytes: uploadedSizeBytes,
       };
     } else if (input.type === 'video') {
       body = {
@@ -837,7 +839,9 @@ export const apiChatRepository: ChatRepository = {
         videoWidth: input.width,
         videoHeight: input.height,
         replyToMessageId: input.replyToMessageId,
-        mediaSizeBytes: input.sizeBytes,
+        // uploadedSizeBytes === input.sizeBytes here — using the hoisted variable keeps
+        // all media kinds consistent (image/voice also use uploadedSizeBytes).
+        mediaSizeBytes: uploadedSizeBytes,
       };
     } else if (input.type === 'location') {
       body = {

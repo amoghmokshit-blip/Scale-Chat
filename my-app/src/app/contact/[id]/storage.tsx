@@ -17,6 +17,7 @@ import { ThemedText } from '@/components/themed-text';
 import { Brand, FontWeight, Radius, Spacing } from '@/constants/theme';
 import { chatRepository } from '@/features/chat/data';
 import { formatBytes } from '@/features/chat/format-bytes';
+import { ChatCopy } from '@/features/chat/copy';
 import { useTheme } from '@/hooks/use-theme';
 
 /**
@@ -43,7 +44,7 @@ export default function ChatStorageScreen() {
     async function load() {
       if (!chatId) {
         setLoading(false);
-        setError('No chat id provided.');
+        setError(ChatCopy.storage.noChatId);
         return;
       }
       try {
@@ -55,7 +56,7 @@ export default function ChatStorageScreen() {
         setError(null);
       } catch {
         if (cancelled) return;
-        setError('Could not load storage info.');
+        setError(ChatCopy.storage.error);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -68,18 +69,18 @@ export default function ChatStorageScreen() {
 
   function handleFreeUp() {
     Alert.alert(
-      'Free up space',
-      'This will clear locally cached media for this chat. The files will still be available to download again.',
+      ChatCopy.storage.freeUpAlert.title,
+      ChatCopy.storage.freeUpAlert.body,
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: ChatCopy.storage.freeUpAlert.cancel, style: 'cancel' },
         {
-          text: 'Clear cache',
+          text: ChatCopy.storage.freeUpAlert.clearCache,
           style: 'destructive',
           onPress: () => {
             // Stub — SDK 56 has no per-chat cache-clear API.
             // Real file-system ops (expo-file-system walk + delete) land in a
             // future ticket once the CDN URL → local-path mapping is tracked.
-            Alert.alert('Done', 'Local cache cleared for this chat.');
+            Alert.alert(ChatCopy.storage.doneAlert.title, ChatCopy.storage.doneAlert.body);
           },
         },
       ],
@@ -100,7 +101,7 @@ export default function ChatStorageScreen() {
             <Feather name="arrow-left" size={20} color={theme.headerCardText} />
           </Pressable>
           <ThemedText style={[styles.title, { color: theme.headerCardText }]}>
-            Manage Storage
+            {ChatCopy.storage.title}
           </ThemedText>
         </View>
       </SafeAreaView>
@@ -130,13 +131,13 @@ export default function ChatStorageScreen() {
                 {formatBytes(Number(summary.totalBytes))}
               </ThemedText>
               <ThemedText style={[styles.totalLabel, { color: theme.textSecondary }]}>
-                Total storage used
+                {ChatCopy.storage.totalLabel}
               </ThemedText>
             </View>
           </View>
 
           <ThemedText style={[styles.disclaimer, { color: theme.textSecondary }]}>
-            Sizes shown for media sent after the last app update.
+            {ChatCopy.storage.disclaimer}
           </ThemedText>
 
           {/* Per-kind rows */}
@@ -159,10 +160,10 @@ export default function ChatStorageScreen() {
                   </View>
                   <View style={styles.kindTextCol}>
                     <ThemedText style={[styles.kindLabel, { color: theme.text }]}>
-                      {kindLabel(row.kind)}
+                      {ChatCopy.storage.kindLabel[row.kind] ?? row.kind}
                     </ThemedText>
                     <ThemedText style={[styles.kindCount, { color: theme.textSecondary }]}>
-                      {row.count} {row.count === 1 ? 'item' : 'items'}
+                      {ChatCopy.storage.itemCount(row.count)}
                     </ThemedText>
                   </View>
                   <ThemedText style={[styles.kindBytes, { color: theme.textSecondary }]}>
@@ -175,7 +176,7 @@ export default function ChatStorageScreen() {
             <View style={styles.emptyWrap}>
               <Feather name="inbox" size={32} color={theme.textSecondary} />
               <ThemedText style={[styles.emptyText, { color: theme.textSecondary }]}>
-                No messages in this chat yet.
+                {ChatCopy.storage.empty}
               </ThemedText>
             </View>
           )}
@@ -183,13 +184,15 @@ export default function ChatStorageScreen() {
           {/* Free up space */}
           <Pressable
             onPress={handleFreeUp}
+            accessibilityRole="button"
+            accessibilityLabel={ChatCopy.storage.freeUpSpace}
             style={({ pressed }) => [
               styles.freeBtn,
               { backgroundColor: Brand.destructiveRed },
               pressed && { opacity: 0.82 },
             ]}>
             <Feather name="trash-2" size={16} color="#FFFFFF" />
-            <ThemedText style={styles.freeBtnLabel}>Free up space</ThemedText>
+            <ThemedText style={styles.freeBtnLabel}>{ChatCopy.storage.freeUpSpace}</ThemedText>
           </Pressable>
         </ScrollView>
       ) : null}
@@ -198,23 +201,6 @@ export default function ChatStorageScreen() {
 }
 
 // ─── Kind metadata helpers ─────────────────────────────────────────────────────
-
-function kindLabel(kind: MessageKind): string {
-  switch (kind) {
-    case 'TEXT': return 'Text messages';
-    case 'IMAGE': return 'Photos';
-    case 'VOICE': return 'Voice notes';
-    case 'VIDEO': return 'Videos';
-    case 'DOCUMENT': return 'Documents';
-    case 'LOCATION': return 'Locations';
-    case 'LOCATION_LIVE': return 'Live locations';
-    case 'CONTACT_CARD': return 'Contacts';
-    case 'POLL': return 'Polls';
-    case 'CALL_EVENT': return 'Call events';
-    case 'SYSTEM': return 'System';
-    default: return kind;
-  }
-}
 
 function kindIcon(kind: MessageKind): keyof typeof Feather.glyphMap {
   switch (kind) {
