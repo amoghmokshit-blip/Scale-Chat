@@ -40,9 +40,29 @@ export type ListThreadsArgs = {
   customFilterId?: string;
 };
 
+/**
+ * Args for `createOneOnOne`. The server only needs ONE of `contactUserId` /
+ * `phoneE164` (it resolves the peer either way). `displayName` / `avatarUri`
+ * are mock-only hints used to render a nice thread offline; the api impl
+ * ignores them (the real `GET /chats/:id` carries the authoritative peer).
+ */
+export type CreateOneOnOneArgs = {
+  contactUserId?: string;
+  phoneE164?: string;
+  displayName?: string;
+  avatarUri?: string | null;
+};
+
 export interface ChatRepository {
   listThreads(args?: ListThreadsArgs): Promise<Thread[]>;
   getThread(threadId: string): Promise<Thread | null>;
+  /**
+   * Create-or-return the 1-on-1 chat with a contact (`POST /chats/one-on-one`,
+   * advisory-locked on the user pair). Resolves with the chat id so the caller
+   * can navigate into the thread. Both impls `notify()` so the home list (which
+   * subscribes via `useThreads`) picks up the new chat.
+   */
+  createOneOnOne(args: CreateOneOnOneArgs): Promise<{ chatId: string }>;
   listMessages(threadId: string): Promise<Message[]>;
   /** Fetch older messages (before the oldest one currently cached). */
   loadOlder?(threadId: string): Promise<LoadOlderResult>;

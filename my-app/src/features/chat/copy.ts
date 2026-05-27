@@ -19,6 +19,17 @@ export const ChatCopy = {
     addFilterBody: 'Saved filters land in a future ticket.',
   },
 
+  /** Invite a friend (New Chat picker → system share sheet). */
+  invite: {
+    /** Footer button + share-sheet dialog title. */
+    button: 'Invite a friend',
+    shareTitle: 'Invite to ScaleChat',
+    // TODO: swap for the real Play Store / universal link once the app ships.
+    url: 'https://scalechat.app',
+    shareMessage: (link: string) =>
+      `Hey! I'm on ScaleChat — let's chat here. Get it: ${link}`,
+  },
+
   thread: {
     typePlaceholder: 'Type a Message',
     voiceCall: 'Voice Call',

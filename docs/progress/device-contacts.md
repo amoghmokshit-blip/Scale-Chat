@@ -21,6 +21,33 @@
 
 ---
 
+## Follow-up — WhatsApp-style New Chat picker + tap-to-chat (2026-05-27)
+
+Builds the "Start chatting" UX on top of PR 6 (contacts already discovered + auto-saved).
+
+- **New Chat picker (`(modals)/new-chat.tsx`)** rebuilt on a `SectionList`: contacts are
+  grouped A→Z (`groupContactsByLetter` in `features/contacts/data/contact-sections.ts`, `#`
+  bucket last) with sticky section headers and a right-edge **A–Z fast-scroll index**
+  (`features/contacts/components/alpha-index-bar.tsx`, tap-to-jump). Typing in search collapses
+  to a flat header-less list and hides the index (WhatsApp parity). An **"Invite a friend"**
+  footer button opens the system share sheet (`Share.share`) with `ChatCopy.invite.shareMessage`
+  + placeholder `ChatCopy.invite.url` (TODO: real store link).
+- **Tap-to-chat is now shared.** New `useStartChat()` (`features/chat/hooks/use-start-chat.ts`)
+  open-or-creates the 1-on-1 and `router.replace`s into the thread, exposing `creatingKey` for a
+  per-row spinner. Both `new-chat.tsx` and `import-contacts.tsx` consume it — the import screen's
+  `MatchRow` is now a `Pressable` (was a read-only `View`), so tapping an imported contact lands
+  directly in the chat.
+- **Repository-backed chat creation.** `createOneOnOne` is now a first-class `ChatRepository`
+  method (api: `POST /chats/one-on-one` + `notify()`; mock: create-or-return with a "pending
+  threads" map that materialises into the home list on first `sendMessage` — so a started chat
+  appears in the one-on-one list after you send, matching WhatsApp). This also fixes new-chat
+  being broken under `EXPO_PUBLIC_USE_MOCKS=true` (it previously called `apiClient` directly).
+- **Tests:** +6 Jest cases (`contact-sections.test.ts`) → **92/92 green**; ChatCopy snapshot
+  refreshed for the new `invite` block. `useContacts({ all: true })` added to page through all
+  contacts for the index (default stays single-page).
+
+---
+
 ## PR 6.1 — What shipped
 
 ### Files touched
@@ -269,3 +296,34 @@ npm --workspace=apps/api run test:e2e -- --testPathPattern="contacts"
 ```
 
 If you re-run `npm run db:setup` it'll start fresh containers on 5433/6380; then no env overrides needed.
+
+---
+
+## WhatsApp-style auto-import refit (2026-05-27)
+
+The original PR-6 flow made device-contact import a deliberate, multi-step,
+user-controlled action: open `/add-contact` → tap "Pick from phonebook" →
+`/import-contacts` → tick checkboxes → tap "Save N selected" → dismiss a blocking
+`Alert`. Per founder feedback ("make it like WhatsApp; there are unnecessary
+steps"), this was refit to a one-tap auto-sync:
+
+- **Primary entry** — the chat-list "+" menu "Add Contact" item now routes directly
+  to `/import-contacts` (was `/add-contact`). `new-chat-menu.tsx`.
+- **Auto-import** — `import-contacts.tsx` no longer has checkboxes, a "Select all"
+  toggle, a sticky "Save" bar, or a success `Alert`. When discovery resolves to a
+  non-empty match set, a `useEffect` calls `contactsRepository.addMany()` **once**
+  (guarded by a `didImport` ref; reset on manual refresh). `addMany` is idempotent
+  (`alreadyHad`) so a cache-hydrated re-entry is harmless.
+- **Read-only list + inline status** — `MatchRow` dropped its checkbox; the header
+  shows a small `ImportStatus` pill (spinner "Adding…" → "Added N" ✓ → "Couldn't
+  add · Retry") where the "Select all" toggle used to be.
+- **Manual add stays reachable** — a secondary "Add a number manually" link
+  (→ `/add-contact`) was added to the idle, denied, and empty-matches states, since
+  the phonebook screen is now the primary path.
+- **Permission copy** — `app.json` `expo-contacts.contactsPermission` no longer says
+  "nothing is saved until you tap Save" (now: "only matches are added to your
+  contacts"). Picked up by the next prebuild.
+
+The `useDeviceContacts` hook is unchanged — it stays a pure discovery pipeline; the
+auto-save lives in the screen. No backend changes (`/contacts/discover` +
+`/contacts/bulk` already support this).

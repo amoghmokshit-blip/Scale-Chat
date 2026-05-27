@@ -37,7 +37,9 @@ export function NewChatMenu({ visible, onDismiss, anchorRef }: Props) {
           key: 'add-contact',
           label: 'Add Contact',
           icon: 'user-plus',
-          onPress: () => router.push('/add-contact'),
+          // Phonebook sync is the primary path (WhatsApp-style); the import
+          // screen links to manual add for the rare case the user wants it.
+          onPress: () => router.push('/import-contacts'),
         },
         {
           key: 'create-super-group',

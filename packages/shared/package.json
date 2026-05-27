@@ -21,7 +21,8 @@
   "files": ["dist"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "watch": "tsc -p tsconfig.json --watch"
+    "watch": "tsc -p tsconfig.json --watch",
+    "prepare": "tsc -p tsconfig.json"
   },
   "dependencies": {
     "zod": "^4.4.3"

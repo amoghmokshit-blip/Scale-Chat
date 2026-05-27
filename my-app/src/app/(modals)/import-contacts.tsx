@@ -1,10 +1,9 @@
 import { Feather } from '@expo/vector-icons';
 import type { ContactDiscoveryMatch } from '@scalechat/shared';
 import { useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Linking,
   Pressable,
@@ -17,17 +16,20 @@ import { ModalHeader } from '@/components/modal-header';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Brand, FontWeight, Radius, Spacing } from '@/constants/theme';
+import { useStartChat } from '@/features/chat/hooks/use-start-chat';
 import { contactsRepository } from '@/features/contacts/data';
 import { useDeviceContacts } from '@/features/contacts/hooks/use-device-contacts';
 import { useTheme } from '@/hooks/use-theme';
 import { ApiError } from '@/lib/api-client';
 
 /**
- * Import Contacts — the "Pick from phonebook" path off /add-contact.
+ * Import Contacts — the primary "Add Contact" path (WhatsApp-style).
  *
- * Five UI states (idle / requesting / denied / loading / ready) driven by
- * `useDeviceContacts`. Each state renders centered until matches arrive,
- * then we swap to a FlatList of checkboxes + sticky "Save N" bottom CTA.
+ * Five discovery states (idle / requesting / denied / loading / ready) driven by
+ * `useDeviceContacts`. Once matches arrive we **auto-import all of them** — no
+ * checkboxes, no Save button, no blocking alert. The list renders read-only with
+ * an inline "Added N friends" status; manual single-contact entry stays reachable
+ * via a secondary link.
  *
  * The screen NEVER uploads the full address book. `useDeviceContacts`:
  *   1. Reads contacts locally,
@@ -35,103 +37,82 @@ import { ApiError } from '@/lib/api-client';
  *   3. POSTs only the normalised list to `/contacts/discover` in chunks,
  *   4. Caches matches in MMKV with a 24h TTL.
  *
- * After Save, `contactsRepository.addMany()` calls `notify()`, so any
- * open `useContacts()` consumer (e.g. /new-chat) refreshes automatically.
+ * Auto-import calls `contactsRepository.addMany()` (idempotent server-side via
+ * `alreadyHad`, and in the mock repo), which `notify()`s subscribers so any open
+ * `useContacts()` consumer (e.g. /new-chat) refreshes automatically.
  */
+
+type ImportState = 'idle' | 'saving' | 'done' | 'error';
+
 export default function ImportContactsScreen() {
-  const router = useRouter();
   const theme = useTheme();
   const { status, matches, scanned, error, requestPermission, refresh } = useDeviceContacts();
+  // Tapping a matched contact opens (or creates) the 1-on-1 chat and navigates
+  // straight into the thread. Matches carry no userId (privacy), so we resolve
+  // the peer by phone — the backend/mock maps it to the user.
+  const { startChat, creatingKey } = useStartChat();
 
-  /** Ids of `phoneE164`s the user has ticked. */
-  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
-  const [saving, setSaving] = useState(false);
+  const [importState, setImportState] = useState<ImportState>('idle');
+  const [savedCount, setSavedCount] = useState(0);
+  const [importError, setImportError] = useState<string | null>(null);
+  // Guards against re-importing on re-render / cache-hydrated `ready`. Reset on a
+  // manual refresh so a fresh discovery imports its new matches.
+  const didImport = useRef(false);
 
-  // Reset selection when matches change (re-discover via pull-to-refresh).
-  // Otherwise stale `selected` keys could refer to phones no longer in `matches`.
-  const selectedInMatches = useMemo(() => {
-    const phoneSet = new Set(matches.map((m) => m.phoneE164));
-    return new Set(Array.from(selected).filter((p) => phoneSet.has(p)));
-  }, [matches, selected]);
-
-  function toggle(phoneE164: string) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(phoneE164)) next.delete(phoneE164);
-      else next.add(phoneE164);
-      return next;
-    });
-  }
-
-  function toggleAll() {
-    if (selectedInMatches.size === matches.length) {
-      setSelected(new Set());
-    } else {
-      setSelected(new Set(matches.map((m) => m.phoneE164)));
-    }
-  }
-
-  async function save() {
-    if (saving || selectedInMatches.size === 0) return;
-    const items = matches
-      .filter((m) => selectedInMatches.has(m.phoneE164))
-      .map((m) => ({ phoneE164: m.phoneE164, displayName: m.displayName }));
-    setSaving(true);
+  const runImport = useCallback(async (toImport: ContactDiscoveryMatch[]) => {
+    setImportState('saving');
+    setImportError(null);
     try {
+      const items = toImport.map((m) => ({ phoneE164: m.phoneE164, displayName: m.displayName }));
       const res = await contactsRepository.addMany({ items });
-      const msg =
-        res.alreadyHad > 0
-          ? `Saved ${res.saved.length} new${res.alreadyHad > 0 ? `, ${res.alreadyHad} were already in your contacts` : ''}.`
-          : `Saved ${res.saved.length} contact${res.saved.length === 1 ? '' : 's'}.`;
-      Alert.alert('Imported', msg, [{ text: 'OK', onPress: () => router.back() }]);
+      setSavedCount(res.saved.length);
+      setImportState('done');
     } catch (err) {
-      // ApiError already unwraps the global { error: { code, message, ... } }
-      // envelope into `.message`/`.code` — see lib/api-client.ts.
-      const msg = err instanceof ApiError ? err.message : 'Could not save contacts.';
-      Alert.alert("Couldn't import", msg);
-    } finally {
-      setSaving(false);
+      // ApiError unwraps the global { error: { code, message } } envelope.
+      setImportError(err instanceof ApiError ? err.message : 'Could not import contacts.');
+      setImportState('error');
     }
-  }
+  }, []);
+
+  // Auto-import every match the moment discovery resolves.
+  useEffect(() => {
+    if (status !== 'ready' || matches.length === 0) return;
+    if (didImport.current) return;
+    didImport.current = true;
+    void runImport(matches);
+  }, [status, matches, runImport]);
+
+  const handleRefresh = useCallback(async () => {
+    didImport.current = false;
+    setImportState('idle');
+    setSavedCount(0);
+    setImportError(null);
+    await refresh();
+  }, [refresh]);
 
   return (
     <ThemedView style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-        <ModalHeader title="Import Contacts" />
+        <ModalHeader title="Add from Contacts" />
         {renderBody({
           status,
           matches,
           scanned,
           error,
-          selected: selectedInMatches,
-          onToggle: toggle,
-          onToggleAll: toggleAll,
+          importState,
+          savedCount,
+          importError,
+          onRetryImport: () => void runImport(matches),
           onRequestPermission: requestPermission,
-          onRefresh: refresh,
+          onRefresh: handleRefresh,
+          onStartChat: (m) =>
+            void startChat(
+              { phoneE164: m.phoneE164, displayName: m.displayName, avatarUri: m.avatarUri },
+              m.phoneE164,
+            ),
+          creatingKey,
           theme,
         })}
-        {status === 'ready' && matches.length > 0 ? (
-          <View style={[styles.bottomBar, { backgroundColor: theme.background }]}>
-            <Pressable
-              onPress={save}
-              disabled={saving || selectedInMatches.size === 0}
-              style={({ pressed }) => [
-                styles.saveBtn,
-                { backgroundColor: Brand.primary },
-                (pressed || saving || selectedInMatches.size === 0) && { opacity: 0.6 },
-              ]}>
-              {saving ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <ThemedText style={styles.saveLabel}>
-                  {selectedInMatches.size === 0
-                    ? 'Select contacts to import'
-                    : `Save ${selectedInMatches.size} selected`}
-                </ThemedText>
-              )}
-            </Pressable>
-          </View>
-        ) : null}
       </SafeAreaView>
     </ThemedView>
   );
@@ -144,11 +125,16 @@ type BodyProps = {
   matches: ContactDiscoveryMatch[];
   scanned: number;
   error: string | null;
-  selected: ReadonlySet<string>;
-  onToggle: (phone: string) => void;
-  onToggleAll: () => void;
+  importState: ImportState;
+  savedCount: number;
+  importError: string | null;
+  onRetryImport: () => void;
   onRequestPermission: () => Promise<void>;
   onRefresh: () => Promise<void>;
+  /** Open (or create) the 1-on-1 chat with a tapped match. */
+  onStartChat: (match: ContactDiscoveryMatch) => void;
+  /** Phone of the row whose chat is currently being opened (spinner + disable). */
+  creatingKey: string | null;
   theme: ReturnType<typeof useTheme>;
 };
 
@@ -212,12 +198,14 @@ function IdleState({
   onRequestPermission: () => Promise<void>;
   theme: ReturnType<typeof useTheme>;
 }) {
+  const router = useRouter();
   return (
     <CenteredCallout
       icon="users"
       title="Find friends on ScaleChat"
-      body="Pick people from your phonebook who already use the app. We only check — nothing's saved until you tap Save."
+      body="We'll add everyone in your phonebook who's already on ScaleChat. We only check your numbers — your address book is never uploaded."
       cta={{ label: 'Continue', onPress: () => void onRequestPermission() }}
+      secondary={{ label: 'Add a number manually', onPress: () => router.replace('/add-contact') }}
       theme={theme}
     />
   );
@@ -231,7 +219,7 @@ function DeniedState({ theme }: { theme: ReturnType<typeof useTheme> }) {
       title="Contacts permission needed"
       body="ScaleChat needs your contacts to find friends on the app. You can grant access from system settings."
       cta={{ label: 'Open Settings', onPress: () => void Linking.openSettings() }}
-      secondary={{ label: 'Add manually instead', onPress: () => router.replace('/add-contact') }}
+      secondary={{ label: 'Add a number manually', onPress: () => router.replace('/add-contact') }}
       theme={theme}
     />
   );
@@ -269,6 +257,7 @@ function ErrorState({
 }
 
 function ReadyState(p: BodyProps) {
+  const router = useRouter();
   if (p.matches.length === 0) {
     return (
       <CenteredCallout
@@ -277,25 +266,26 @@ function ReadyState(p: BodyProps) {
         body={
           p.scanned > 0
             ? `We scanned ${p.scanned} ${p.scanned === 1 ? 'contact' : 'contacts'}. None are on ScaleChat yet — we'll let you know when they join.`
-            : "Your phonebook is empty or no numbers were valid Indian mobiles."
+            : 'Your phonebook is empty or no numbers were valid Indian mobiles.'
         }
+        cta={{ label: 'Add a number manually', onPress: () => router.replace('/add-contact') }}
         secondary={{ label: 'Refresh', onPress: () => void p.onRefresh() }}
         theme={p.theme}
       />
     );
   }
-  const allSelected = p.selected.size === p.matches.length;
   return (
     <View style={styles.listWrap}>
       <View style={styles.listHeader}>
         <ThemedText style={[styles.listHeaderLabel, { color: p.theme.textSecondary }]}>
           {p.matches.length} on ScaleChat · {p.scanned} scanned
         </ThemedText>
-        <Pressable onPress={p.onToggleAll} hitSlop={8}>
-          <ThemedText style={[styles.listHeaderAction, { color: Brand.primary }]}>
-            {allSelected ? 'Deselect all' : 'Select all'}
-          </ThemedText>
-        </Pressable>
+        <ImportStatus
+          state={p.importState}
+          savedCount={p.savedCount}
+          onRetry={p.onRetryImport}
+          theme={p.theme}
+        />
       </View>
       <FlatList
         data={p.matches}
@@ -305,8 +295,8 @@ function ReadyState(p: BodyProps) {
         renderItem={({ item }) => (
           <MatchRow
             match={item}
-            selected={p.selected.has(item.phoneE164)}
-            onToggle={() => p.onToggle(item.phoneE164)}
+            onPress={() => p.onStartChat(item)}
+            creating={p.creatingKey === item.phoneE164}
             theme={p.theme}
           />
         )}
@@ -315,43 +305,71 @@ function ReadyState(p: BodyProps) {
   );
 }
 
+/** Inline status pill where the old "Select all" toggle used to live. */
+function ImportStatus({
+  state,
+  savedCount,
+  onRetry,
+  theme,
+}: {
+  state: ImportState;
+  savedCount: number;
+  onRetry: () => void;
+  theme: ReturnType<typeof useTheme>;
+}) {
+  if (state === 'saving') {
+    return (
+      <View style={styles.statusRow}>
+        <ActivityIndicator size="small" color={theme.textSecondary} />
+        <ThemedText style={[styles.statusLabel, { color: theme.textSecondary }]}>Adding…</ThemedText>
+      </View>
+    );
+  }
+  if (state === 'done') {
+    return (
+      <View style={styles.statusRow}>
+        <Feather name="check-circle" size={14} color={Brand.accent} />
+        <ThemedText style={[styles.statusLabel, { color: Brand.accent }]}>
+          {savedCount > 0 ? `Added ${savedCount}` : 'Up to date'}
+        </ThemedText>
+      </View>
+    );
+  }
+  if (state === 'error') {
+    return (
+      <Pressable onPress={onRetry} hitSlop={8}>
+        <ThemedText style={[styles.statusLabel, { color: Brand.primary }]}>Couldn&apos;t add · Retry</ThemedText>
+      </Pressable>
+    );
+  }
+  return null;
+}
+
 function MatchRow({
   match,
-  selected,
-  onToggle,
+  onPress,
+  creating,
   theme,
 }: {
   match: ContactDiscoveryMatch;
-  selected: boolean;
-  onToggle: () => void;
+  onPress: () => void;
+  creating: boolean;
   theme: ReturnType<typeof useTheme>;
 }) {
   return (
     <Pressable
-      onPress={onToggle}
-      accessibilityLabel={`${match.displayName}, ${selected ? 'selected' : 'not selected'}`}
+      accessibilityRole="button"
+      accessibilityLabel={`Chat with ${match.displayName}, on ScaleChat`}
+      onPress={onPress}
+      disabled={creating}
       style={({ pressed }) => [
         styles.row,
         { backgroundColor: theme.surfaceMuted },
         pressed && { opacity: 0.85 },
+        creating && { opacity: 0.6 },
       ]}>
-      <View
-        style={[
-          styles.checkbox,
-          {
-            borderColor: selected ? Brand.accent : theme.textSecondary,
-            backgroundColor: selected ? Brand.accent : 'transparent',
-          },
-        ]}>
-        {selected ? <Feather name="check" size={14} color={Brand.accentText} /> : null}
-      </View>
-
       {/* Avatar disc — use platform avatar if any, else first-letter fallback. */}
-      <View
-        style={[
-          styles.avatar,
-          { backgroundColor: theme.surfaceInput },
-        ]}>
+      <View style={[styles.avatar, { backgroundColor: theme.surfaceInput }]}>
         <ThemedText style={[styles.avatarInitial, { color: theme.text }]}>
           {match.displayName[0]?.toUpperCase() ?? '?'}
         </ThemedText>
@@ -366,9 +384,15 @@ function MatchRow({
         </ThemedText>
       </View>
 
-      <View style={[styles.badge, { backgroundColor: Brand.accent }]}>
-        <ThemedText style={[styles.badgeText, { color: Brand.accentText }]}>ON PLATFORM</ThemedText>
-      </View>
+      {creating ? (
+        <ActivityIndicator color={theme.text} />
+      ) : (
+        <View style={[styles.badge, { backgroundColor: Brand.accent }]}>
+          <ThemedText style={[styles.badgeText, { color: Brand.accentText }]}>
+            ON PLATFORM
+          </ThemedText>
+        </View>
+      )}
     </Pressable>
   );
 }
@@ -438,7 +462,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: FontWeight.medium,
   },
-  listHeaderAction: {
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one + 2,
+  },
+  statusLabel: {
     fontSize: 13,
     fontWeight: FontWeight.semibold,
   },
@@ -453,14 +482,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.three,
     borderRadius: Radius.cardLg,
-  },
-  checkbox: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   avatar: {
     width: 40,
@@ -494,21 +515,5 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: FontWeight.bold,
     letterSpacing: 0.4,
-  },
-
-  bottomBar: {
-    paddingHorizontal: Spacing.four,
-    paddingTop: Spacing.three,
-    paddingBottom: Spacing.three,
-  },
-  saveBtn: {
-    paddingVertical: Spacing.three + 2,
-    borderRadius: Radius.pill,
-    alignItems: 'center',
-  },
-  saveLabel: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: FontWeight.semibold,
   },
 });

@@ -12,7 +12,11 @@
     },
     "preview": {
       "distribution": "internal",
-      "android": { "buildType": "apk" }
+      "android": { "buildType": "apk" },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://beanlike-inge-uncorned.ngrok-free.dev",
+        "EXPO_PUBLIC_USE_MOCKS": "false"
+      }
     },
     "production": {
       "autoIncrement": true,
