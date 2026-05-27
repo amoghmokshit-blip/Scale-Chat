@@ -273,6 +273,7 @@ export class MessagesService {
       lastReadSequence: member.lastReadSequence.toString(),
       counterpartLastReadSequence:
         counterpartMember?.lastReadSequence.toString() ?? null,
+      chatTheme: (member.chatTheme as ChatDetailDto['chatTheme']) ?? null,
     };
   }
 
