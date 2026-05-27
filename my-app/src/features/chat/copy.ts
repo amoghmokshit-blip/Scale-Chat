@@ -268,6 +268,46 @@ export const ChatCopy = {
     applyFailed: 'Could not apply theme. Please try again.',
   },
 
+  /** Privacy sub-screen (P2-Privacy). */
+  privacy: {
+    /** Screen header title. */
+    screenTitle: 'Privacy',
+    /** Encryption row label. */
+    encryptionLabel: 'Encryption',
+    /** Encryption row hint shown below the label. */
+    encryptionHint: 'Messages secured in transit',
+    /** ComingSoonSheet title for the encryption info modal. */
+    encryptionTitle: 'End-to-end encryption',
+    /** ComingSoonSheet body for the encryption info modal. */
+    encryptionBody:
+      'All messages between you and this contact are encrypted in transit using TLS. No one outside this conversation can read them.',
+    /** Disappearing messages row label. */
+    disappearingLabel: 'Disappearing messages',
+    /** Disappearing messages hint (coming-soon placeholder). */
+    disappearingHint: 'Coming soon',
+    /** Block row label (contact is not blocked). */
+    blockLabel: 'Block',
+    /** Unblock row label (contact is already blocked). */
+    unblockLabel: 'Unblock',
+    /** Hint shown under block label when not blocked. */
+    blockHint: "Block this contact",
+    /** Hint shown under unblock label when blocked. */
+    blockedHint: 'You have blocked this contact',
+    /** Alert title for blocking — includes the contact name. */
+    blockAlertTitle: (name: string) => `Block ${name}?`,
+    /** Alert title for unblocking — includes the contact name. */
+    unblockAlertTitle: (name: string) => `Unblock ${name}?`,
+    /** Alert body for blocking. */
+    blockAlertBody:
+      "They won't be able to message you, and you won't be able to message them, until you unblock.",
+    /** Alert body for unblocking. */
+    unblockAlertBody: 'You will both be able to message each other again.',
+    /** Error shown when block fails. */
+    blockFailed: 'Could not block. Please try again.',
+    /** Error shown when unblock fails. */
+    unblockFailed: 'Could not unblock. Please try again.',
+  },
+
   /** Voice/Video call UI (Tranche 2.I). */
   calls: {
     incomingVoice: 'Incoming voice call',
