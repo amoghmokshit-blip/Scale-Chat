@@ -129,8 +129,8 @@ describe('GET /chats/:chatId/storage', () => {
   it('sums mediaSizeBytes for IMAGE rows inserted directly', async () => {
     const chatId = await openChat(alice, bob);
 
-    // Retrieve alice's membership sequence state by reading the chat
-    // then insert two IMAGE rows with known sizes directly via prisma.
+    // Insert two IMAGE rows with known sizes directly via prisma (bypasses the
+    // R2 presign path, which isn't wired in the e2e env).
     const fakeKey = (n: number) => `chat-media/aaaabbbb/fake-image-${n}.jpg`;
 
     await testApp.prisma.message.create({

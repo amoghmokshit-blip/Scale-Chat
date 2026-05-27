@@ -730,6 +730,7 @@ export class MessagesService {
       WHERE "chatId" = ${chatId}::uuid
         AND "deletedAt" IS NULL
       GROUP BY kind
+      ORDER BY "totalBytes" DESC
     `;
 
     let grandTotal = 0n;
