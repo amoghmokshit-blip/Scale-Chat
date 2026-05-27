@@ -1,0 +1,25 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`Profile screen v2 — row-set structural guard destructive rows match snapshot 1`] = `
+[
+  "Clear Chat",
+  "Block",
+]
+`;
+
+exports[`Profile screen v2 — row-set structural guard options section has 5 rows in order 1`] = `
+[
+  "Media, Links & Docs",
+  "Chat Theme",
+  "Notifications",
+  "Manage Storage",
+  "Privacy",
+]
+`;
+
+exports[`Profile screen v2 — row-set structural guard section keys match snapshot 1`] = `
+[
+  "options",
+  "destructive",
+]
+`;
