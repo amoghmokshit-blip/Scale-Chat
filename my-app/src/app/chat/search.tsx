@@ -83,10 +83,14 @@ export default function ChatSearchScreen() {
   }, [deferredQuery, threadId]);
 
   function handleHitPress(hit: MessageSearchHit) {
-    // Navigate back to the thread with the sequence to highlight.
-    // `router.back()` first so the modal dismisses before we push params.
-    router.back();
-    router.setParams({ highlightSequence: hit.sequence });
+    // Navigate to the thread (below this modal in the stack) with the sequence to
+    // highlight. A single `navigate` pops the modal AND applies the param atomically
+    // — avoids the back()+setParams() race where setParams could fire mid-transition.
+    if (!threadId) return;
+    router.navigate({
+      pathname: '/chat/[id]',
+      params: { id: threadId, highlightSequence: hit.sequence },
+    });
   }
 
   const showEmpty = !loading && !error && deferredQuery.trim().length >= 1 && hits.length === 0;
