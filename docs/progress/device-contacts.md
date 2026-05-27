@@ -21,6 +21,33 @@
 
 ---
 
+## Follow-up — WhatsApp-style New Chat picker + tap-to-chat (2026-05-27)
+
+Builds the "Start chatting" UX on top of PR 6 (contacts already discovered + auto-saved).
+
+- **New Chat picker (`(modals)/new-chat.tsx`)** rebuilt on a `SectionList`: contacts are
+  grouped A→Z (`groupContactsByLetter` in `features/contacts/data/contact-sections.ts`, `#`
+  bucket last) with sticky section headers and a right-edge **A–Z fast-scroll index**
+  (`features/contacts/components/alpha-index-bar.tsx`, tap-to-jump). Typing in search collapses
+  to a flat header-less list and hides the index (WhatsApp parity). An **"Invite a friend"**
+  footer button opens the system share sheet (`Share.share`) with `ChatCopy.invite.shareMessage`
+  + placeholder `ChatCopy.invite.url` (TODO: real store link).
+- **Tap-to-chat is now shared.** New `useStartChat()` (`features/chat/hooks/use-start-chat.ts`)
+  open-or-creates the 1-on-1 and `router.replace`s into the thread, exposing `creatingKey` for a
+  per-row spinner. Both `new-chat.tsx` and `import-contacts.tsx` consume it — the import screen's
+  `MatchRow` is now a `Pressable` (was a read-only `View`), so tapping an imported contact lands
+  directly in the chat.
+- **Repository-backed chat creation.** `createOneOnOne` is now a first-class `ChatRepository`
+  method (api: `POST /chats/one-on-one` + `notify()`; mock: create-or-return with a "pending
+  threads" map that materialises into the home list on first `sendMessage` — so a started chat
+  appears in the one-on-one list after you send, matching WhatsApp). This also fixes new-chat
+  being broken under `EXPO_PUBLIC_USE_MOCKS=true` (it previously called `apiClient` directly).
+- **Tests:** +6 Jest cases (`contact-sections.test.ts`) → **92/92 green**; ChatCopy snapshot
+  refreshed for the new `invite` block. `useContacts({ all: true })` added to page through all
+  contacts for the index (default stays single-page).
+
+---
+
 ## PR 6.1 — What shipped
 
 ### Files touched

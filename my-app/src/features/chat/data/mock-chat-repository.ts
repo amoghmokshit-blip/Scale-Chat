@@ -52,6 +52,12 @@ function loadInitial(): Snapshot {
 let state: Snapshot | null = null;
 const listeners = new Set<() => void>();
 
+// Threads created via `createOneOnOne` but not yet messaged. They're visible to
+// `getThread` (so the thread screen renders) but kept out of the home list until
+// the first `sendMessage` materialises them — mirroring WhatsApp, where a brand
+// new chat only appears in the chat list once you've sent something.
+const pendingThreads = new Map<string, Thread>();
+
 function getState(): Snapshot {
   if (state === null) state = loadInitial();
   return state;
@@ -128,7 +134,57 @@ export const mockChatRepository: ChatRepository = {
 
   async getThread(threadId) {
     await sleep();
-    return clone(getState().threads.find((t) => t.id === threadId) ?? null);
+    const existing = getState().threads.find((t) => t.id === threadId);
+    if (existing) return clone(existing);
+    // Fall back to a not-yet-messaged chat so the thread screen can render its
+    // header/counterpart immediately after `createOneOnOne`.
+    return clone(pendingThreads.get(threadId) ?? null);
+  },
+
+  async createOneOnOne(args) {
+    await sleep();
+    const s = getState();
+    const matches = (c: Thread['counterpart']): boolean =>
+      (args.contactUserId != null && c.id === args.contactUserId) ||
+      (args.phoneE164 != null && c.phoneE164 === args.phoneE164);
+
+    // Reuse an existing visible thread or a pending one for the same peer.
+    const visible = s.threads.find((t) => t.kind === 'direct' && matches(t.counterpart));
+    if (visible) return { chatId: visible.id };
+    for (const [id, t] of pendingThreads) {
+      if (matches(t.counterpart)) return { chatId: id };
+    }
+
+    // Create a fresh, not-yet-messaged thread. The placeholder `lastMessage` is
+    // never shown (pending threads are excluded from the home list); the first
+    // `sendMessage` replaces it when the thread materialises.
+    const chatId = `t-new-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const counterpartId = args.contactUserId ?? `u-${args.phoneE164 ?? chatId}`;
+    const placeholder: Message = {
+      id: `${chatId}-seed`,
+      threadId: chatId,
+      senderId: counterpartId,
+      sequence: 0,
+      createdAt: new Date().toISOString(),
+      status: 'sent',
+      type: 'text',
+      text: '',
+    };
+    const thread: Thread = {
+      id: chatId,
+      kind: 'direct',
+      counterpart: {
+        id: counterpartId,
+        displayName: args.displayName ?? args.phoneE164 ?? 'New chat',
+        phoneE164: args.phoneE164,
+        avatarUri: args.avatarUri ?? undefined,
+      },
+      lastMessage: placeholder,
+      unreadCount: 0,
+      lastReadSequence: 0,
+    };
+    pendingThreads.set(chatId, thread);
+    return { chatId };
   },
 
   async listMessages(threadId) {
@@ -195,6 +251,16 @@ export const mockChatRepository: ChatRepository = {
         contactName: input.contactName,
         contactPhoneE164: input.contactPhoneE164,
       };
+    }
+
+    // Materialise a pending (not-yet-messaged) thread into the visible list on
+    // its first send so it appears in the home chat list.
+    if (!s.threads.some((t) => t.id === input.threadId)) {
+      const pending = pendingThreads.get(input.threadId);
+      if (pending) {
+        s.threads = [...s.threads, pending];
+        pendingThreads.delete(input.threadId);
+      }
     }
 
     const list = s.messagesByThread[input.threadId] ?? [];

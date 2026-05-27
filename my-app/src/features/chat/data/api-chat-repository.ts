@@ -577,6 +577,20 @@ export const apiChatRepository: ChatRepository = {
     }
   },
 
+  async createOneOnOne(args) {
+    ensureSocketWired();
+    // The server resolves the peer from either id; the display hints are
+    // mock-only, so we don't forward them.
+    const body = args.contactUserId
+      ? { contactUserId: args.contactUserId }
+      : { phoneE164: args.phoneE164 };
+    const res = await apiClient.post<{ chatId: string }>('/chats/one-on-one', body);
+    // The new chat enters `GET /chats` once it has a message; notify so the
+    // home list refreshes (no-op visually until the first send).
+    notify();
+    return { chatId: res.chatId };
+  },
+
   async listMessages(threadId) {
     ensureSocketWired();
     if (!counterpartByChatId.has(threadId)) {

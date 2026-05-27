@@ -16,6 +16,7 @@ import { ModalHeader } from '@/components/modal-header';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Brand, FontWeight, Radius, Spacing } from '@/constants/theme';
+import { useStartChat } from '@/features/chat/hooks/use-start-chat';
 import { contactsRepository } from '@/features/contacts/data';
 import { useDeviceContacts } from '@/features/contacts/hooks/use-device-contacts';
 import { useTheme } from '@/hooks/use-theme';
@@ -46,6 +47,10 @@ type ImportState = 'idle' | 'saving' | 'done' | 'error';
 export default function ImportContactsScreen() {
   const theme = useTheme();
   const { status, matches, scanned, error, requestPermission, refresh } = useDeviceContacts();
+  // Tapping a matched contact opens (or creates) the 1-on-1 chat and navigates
+  // straight into the thread. Matches carry no userId (privacy), so we resolve
+  // the peer by phone — the backend/mock maps it to the user.
+  const { startChat, creatingKey } = useStartChat();
 
   const [importState, setImportState] = useState<ImportState>('idle');
   const [savedCount, setSavedCount] = useState(0);
@@ -100,6 +105,12 @@ export default function ImportContactsScreen() {
           onRetryImport: () => void runImport(matches),
           onRequestPermission: requestPermission,
           onRefresh: handleRefresh,
+          onStartChat: (m) =>
+            void startChat(
+              { phoneE164: m.phoneE164, displayName: m.displayName, avatarUri: m.avatarUri },
+              m.phoneE164,
+            ),
+          creatingKey,
           theme,
         })}
       </SafeAreaView>
@@ -120,6 +131,10 @@ type BodyProps = {
   onRetryImport: () => void;
   onRequestPermission: () => Promise<void>;
   onRefresh: () => Promise<void>;
+  /** Open (or create) the 1-on-1 chat with a tapped match. */
+  onStartChat: (match: ContactDiscoveryMatch) => void;
+  /** Phone of the row whose chat is currently being opened (spinner + disable). */
+  creatingKey: string | null;
   theme: ReturnType<typeof useTheme>;
 };
 
@@ -277,7 +292,14 @@ function ReadyState(p: BodyProps) {
         keyExtractor={(m) => m.phoneE164}
         contentContainerStyle={styles.listContent}
         ItemSeparatorComponent={() => <View style={{ height: Spacing.one }} />}
-        renderItem={({ item }) => <MatchRow match={item} theme={p.theme} />}
+        renderItem={({ item }) => (
+          <MatchRow
+            match={item}
+            onPress={() => p.onStartChat(item)}
+            creating={p.creatingKey === item.phoneE164}
+            theme={p.theme}
+          />
+        )}
       />
     </View>
   );
@@ -325,15 +347,27 @@ function ImportStatus({
 
 function MatchRow({
   match,
+  onPress,
+  creating,
   theme,
 }: {
   match: ContactDiscoveryMatch;
+  onPress: () => void;
+  creating: boolean;
   theme: ReturnType<typeof useTheme>;
 }) {
   return (
-    <View
-      accessibilityLabel={`${match.displayName}, on ScaleChat`}
-      style={[styles.row, { backgroundColor: theme.surfaceMuted }]}>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`Chat with ${match.displayName}, on ScaleChat`}
+      onPress={onPress}
+      disabled={creating}
+      style={({ pressed }) => [
+        styles.row,
+        { backgroundColor: theme.surfaceMuted },
+        pressed && { opacity: 0.85 },
+        creating && { opacity: 0.6 },
+      ]}>
       {/* Avatar disc — use platform avatar if any, else first-letter fallback. */}
       <View style={[styles.avatar, { backgroundColor: theme.surfaceInput }]}>
         <ThemedText style={[styles.avatarInitial, { color: theme.text }]}>
@@ -350,10 +384,16 @@ function MatchRow({
         </ThemedText>
       </View>
 
-      <View style={[styles.badge, { backgroundColor: Brand.accent }]}>
-        <ThemedText style={[styles.badgeText, { color: Brand.accentText }]}>ON PLATFORM</ThemedText>
-      </View>
-    </View>
+      {creating ? (
+        <ActivityIndicator color={theme.text} />
+      ) : (
+        <View style={[styles.badge, { backgroundColor: Brand.accent }]}>
+          <ThemedText style={[styles.badgeText, { color: Brand.accentText }]}>
+            ON PLATFORM
+          </ThemedText>
+        </View>
+      )}
+    </Pressable>
   );
 }
 

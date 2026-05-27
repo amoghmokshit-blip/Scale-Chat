@@ -6,6 +6,13 @@ import { contactsRepository } from '../data';
 type Args = {
   /** Free-text predicate. Debounced internally via React 19's useDeferredValue. */
   search?: string;
+  /**
+   * Load EVERY page (loop `list({ cursor })` until `nextCursor` is null) instead
+   * of just the first. The New Chat picker needs the full set to build its A–Z
+   * index. Ignored while searching — the server already returns the full match
+   * set for a query. Defaults to false so other consumers stay single-page.
+   */
+  all?: boolean;
 };
 
 type State = {
@@ -21,7 +28,7 @@ type State = {
  * gets the same network rhythm — useDeferredValue yields to higher-priority
  * renders before issuing the API call.
  */
-export function useContacts({ search = '' }: Args = {}): State {
+export function useContacts({ search = '', all = false }: Args = {}): State {
   const deferredSearch = useDeferredValue(search.trim());
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
@@ -31,6 +38,19 @@ export function useContacts({ search = '' }: Args = {}): State {
 
     async function refresh() {
       try {
+        // Loop all pages only when requested and not searching.
+        if (all && !deferredSearch) {
+          const acc: Contact[] = [];
+          let cursor: string | undefined;
+          do {
+            const page = await contactsRepository.list(cursor ? { cursor } : undefined);
+            acc.push(...page.items);
+            cursor = page.nextCursor ?? undefined;
+          } while (cursor && active);
+          if (!active) return;
+          setContacts(acc);
+          return;
+        }
         const { items } = await contactsRepository.list(
           deferredSearch ? { search: deferredSearch } : undefined,
         );
@@ -49,7 +69,7 @@ export function useContacts({ search = '' }: Args = {}): State {
       active = false;
       unsubscribe();
     };
-  }, [deferredSearch]);
+  }, [deferredSearch, all]);
 
   return { contacts, loading };
 }
