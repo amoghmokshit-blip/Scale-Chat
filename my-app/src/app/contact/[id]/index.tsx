@@ -335,12 +335,6 @@ export default function ContactProfileScreen() {
               <Feather name="chevron-left" size={20} color="#1B1B1B" />
             </Pressable>
           </View>
-          <View style={styles.bannerNameBlock}>
-            <ThemedText style={styles.heroName}>{card.fullName}</ThemedText>
-            <ThemedText style={styles.heroPhone}>
-              {formatProfilePhone(card.phoneE164)}
-            </ThemedText>
-          </View>
         </SafeAreaView>
       </View>
 
@@ -352,6 +346,15 @@ export default function ContactProfileScreen() {
         <View style={styles.avatarRing}>
           <Avatar contact={avatarContact} size={112} />
         </View>
+      </View>
+
+      {/* Name + phone sit BELOW the avatar on the dark background (Figma 1:3877:
+          avatar top=111 overlapping the banner, name=239, phone=269). */}
+      <View style={styles.nameBlock}>
+        <ThemedText style={styles.heroName}>{card.fullName}</ThemedText>
+        <ThemedText style={styles.heroPhone}>
+          {formatProfilePhone(card.phoneE164)}
+        </ThemedText>
       </View>
 
       {/* Action-tile row */}
@@ -520,11 +523,11 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: Radius.bubble,
     paddingBottom: Spacing.four,
   },
-  bannerNameBlock: {
+  nameBlock: {
     alignItems: 'center',
     paddingHorizontal: Spacing.three,
-    paddingTop: Spacing.two,
     gap: 4,
+    marginBottom: Spacing.two,
   },
   heroName: {
     fontSize: 20,
@@ -542,7 +545,7 @@ const styles = StyleSheet.create({
   avatarRingWrap: {
     alignItems: 'center',
     marginTop: -64,
-    marginBottom: Spacing.two,
+    marginBottom: 8,
   },
   avatarRing: {
     width: 128,
