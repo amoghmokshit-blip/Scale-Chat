@@ -191,6 +191,9 @@ export const ChatCopy = {
     clearChatConfirmTitle: 'Clear this chat?',
     clearChatConfirmBody: 'All messages will be removed from your device. Your contact will still have their copy.',
     clearChatCta: 'Clear chat',
+    /** Media, Links & Docs — sheet title + body (shown when no commonChatId). */
+    mediaTitle: 'No shared media yet',
+    mediaBody: 'Start a chat to share photos, voice notes, and documents — they\'ll show up here.',
   },
 
   /** In-thread message search overlay (P2-Search). */

@@ -39,7 +39,7 @@ function formatProfilePhone(e164: string): string {
   return formatIndianMobile(localDigitsFromE164(e164));
 }
 
-type SheetKind = 'notifications' | 'search' | 'manageStorage' | 'chatTheme' | null;
+type SheetKind = 'notifications' | 'search' | 'media' | 'manageStorage' | 'chatTheme' | null;
 
 /**
  * Contact Profile screen v2 — Figma `1:3877`.
@@ -92,6 +92,26 @@ export default function ContactProfileScreen() {
   const [isBlocked, setIsBlocked] = useState<boolean>(false);
   useEffect(() => {
     if (card) setIsBlocked(card.isBlocked);
+  }, [card]);
+
+  // BUG_004: seed chatTheme from the thread so the picker checkmark is correct
+  // on first open. The profile-card DTO has no chatTheme field, so we fetch the
+  // thread separately. Fire-and-forget — never block the screen render on it.
+  useEffect(() => {
+    if (!card?.commonChatId) return;
+    let cancelled = false;
+    const fn = chatRepository.getThread;
+    if (!fn) return;
+    fn.call(chatRepository, card.commonChatId)
+      .then((t) => {
+        if (!cancelled) setChatThemeLocal(t?.chatTheme ?? null);
+      })
+      .catch(() => {
+        // best-effort — picker falls back to Default checkmark
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [card]);
 
   useEffect(() => {
@@ -268,7 +288,7 @@ export default function ContactProfileScreen() {
                       pathname: '/contact/[id]/media',
                       params: { id: card.id, chatId: card.commonChatId },
                     })
-                  : setSheet('search')
+                  : setSheet('media')
               }
             />
             <OptionRow
@@ -473,6 +493,15 @@ export default function ContactProfileScreen() {
         icon="search"
         title={ChatCopy.profile.searchTitle}
         body={ChatCopy.profile.searchBody}
+        onClose={() => setSheet(null)}
+      />
+
+      {/* Media coming soon — fallback when no commonChatId */}
+      <ComingSoonSheet
+        visible={sheet === 'media'}
+        icon="image"
+        title={ChatCopy.profile.mediaTitle}
+        body={ChatCopy.profile.mediaBody}
         onClose={() => setSheet(null)}
       />
 

@@ -122,6 +122,8 @@ exports[`ChatCopy matches the expected snapshot (regression guard against accide
   "profile.clearChatCta:string",
   "profile.manageStorageBody:string",
   "profile.manageStorageTitle:string",
+  "profile.mediaBody:string",
+  "profile.mediaTitle:string",
   "profile.privacyBody:string",
   "profile.privacyTitle:string",
   "profile.searchBody:string",
