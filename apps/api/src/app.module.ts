@@ -21,6 +21,7 @@ import { MediaModule } from './modules/media/media.module';
 import { MessagesModule } from './modules/messages/messages.module';
 import { PinModule } from './modules/pin/pin.module';
 import { PollsModule } from './modules/polls/polls.module';
+import { PushModule } from './modules/push/push.module';
 import { ReactionsModule } from './modules/reactions/reactions.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { UsersModule } from './modules/users/users.module';
@@ -61,6 +62,7 @@ import { UsersModule } from './modules/users/users.module';
     ForwardModule,
     PinModule,
     PollsModule,
+    PushModule,
     CallsModule,
   ],
   providers: [

@@ -1,4 +1,11 @@
 import { MAX_PINNED_PER_CHAT } from '@scalechat/shared';
+import type {
+  CallAcceptResponse,
+  CallKind,
+  CallSummary,
+  CallTokenResponse,
+  DevicePlatform,
+} from '@scalechat/shared';
 
 import { ApiError } from '@/lib/api-client';
 import { StorageKeys, getJson, setJson } from '@/lib/mmkv';
@@ -571,6 +578,50 @@ export const mockChatRepository: ChatRepository = {
       t.id === threadId ? { ...t, isFavourite: !t.isFavourite } : t
     );
     persist();
+  },
+
+  // ─── Calls (Tranche 2.H/2.I) ────────────────────────────────────────────────
+  // Mock returns synthetic tokens so the call UI mounts without crashing in the
+  // offline dev flow. Real media needs USE_MOCKS=false + the live backend —
+  // a connect against `wss://mock.invalid` fails gracefully into the call
+  // screen's abnormal-termination → back path.
+
+  async startCall(threadId, kind: CallKind): Promise<CallTokenResponse> {
+    await sleep();
+    return {
+      callId: `mock-call-${Date.now()}`,
+      roomName: `mock-room-${threadId}`,
+      accessToken: 'mock-access-token',
+      wsUrl: 'wss://mock.invalid',
+      expiresAt: new Date(Date.now() + 7_200_000).toISOString(),
+    };
+  },
+
+  async acceptCall(_callId): Promise<CallAcceptResponse> {
+    await sleep();
+    return {
+      roomName: 'mock-room',
+      accessToken: 'mock-access-token',
+      wsUrl: 'wss://mock.invalid',
+      expiresAt: new Date(Date.now() + 7_200_000).toISOString(),
+    };
+  },
+
+  async declineCall(_callId) {
+    await sleep();
+  },
+
+  async hangupCall(_callId) {
+    await sleep();
+  },
+
+  async listCallsInThread(_threadId): Promise<CallSummary[]> {
+    await sleep();
+    return [];
+  },
+
+  async registerPushToken(_token, _platform: DevicePlatform) {
+    // no-op in mock mode (no push service)
   },
 
   subscribe(listener) {

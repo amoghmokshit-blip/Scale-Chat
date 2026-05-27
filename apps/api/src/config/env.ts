@@ -57,20 +57,28 @@ export const envSchema = z.object({
   R2_SECRET_ACCESS_KEY: z.string().min(1).optional(),
   R2_PUBLIC_BASE_URL: z.string().url().optional(),
 
-  // ─── 100ms (calls provider, Tranche 2.H) ──────────────────────────────────
+  // ─── LiveKit (calls provider, Tranche 2.H PR-2) ───────────────────────────
   //
-  // Backs the `/calls/token` endpoint. All four optional so local devs can
-  // boot without 100ms credentials; the calls controller returns 503
-  // `calls_not_configured` when unset. (See `docs/architecture/
-  // calls-provider-poc.md` — 100ms picked provisional; LiveKit swap touches
-  // only the env-var prefix + `hms.client.ts`.)
+  // Backs `/calls/token` + the LiveKit webhook. All three optional so local
+  // devs boot without creds — the calls module then runs in STUB MODE
+  // (synthetic rooms + dev tokens not valid against LiveKit; see
+  // `livekit.client.ts` + `docs/architecture/calls-provider-poc.md` §8.1).
+  // LIVEKIT_URL is the wss client URL (e.g. wss://<project>.livekit.cloud);
+  // the server RoomServiceClient converts it to https internally.
   //
-  // Defaults to per-call ring-timeout of 30s; tests can set BULLMQ_RING_TIMEOUT_MS
-  // shorter so the suite doesn't have to wait the full window.
-  HMS_MANAGEMENT_TOKEN: z.string().optional(),
-  HMS_APP_ACCESS_KEY: z.string().optional(),
-  HMS_APP_SECRET: z.string().optional(),
-  HMS_WEBHOOK_SECRET: z.string().optional(),
+  // BULLMQ_RING_TIMEOUT_MS: per-call ring window (30s); tests shorten it so the
+  // suite doesn't wait the full window.
+  LIVEKIT_API_KEY: z.string().optional(),
+  LIVEKIT_API_SECRET: z.string().optional(),
+  LIVEKIT_URL: z.string().optional(),
+  // ─── Expo push (call wakeup, Tranche 2.I) ─────────────────────────────────
+  // Optional: Expo push works without a token for low volume; the access token
+  // raises rate limits. APNs slots are iOS-later scaffold (enable when the
+  // Apple Developer Program lands — see docs/architecture/ios-enablement-checklist.md).
+  EXPO_ACCESS_TOKEN: z.string().optional(),
+  APNS_KEY_ID: z.string().optional(),
+  APNS_TEAM_ID: z.string().optional(),
+  APNS_KEY_P8_B64: z.string().optional(),
   BULLMQ_RING_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
 });
 

@@ -189,5 +189,29 @@ to rebuild the call screen.
 
 ---
 
-**Status:** Desk research complete. Recommendation locked: **100ms (provisional)**.
-Live-test gates from §6 owed before Tranche 2.H PR-2.
+**Status:** Desk research complete. Original recommendation: **100ms (provisional)** — superseded, see §8.1.
+
+---
+
+## §8.1 Decision update (2026-05-26): switched to **LiveKit**
+
+Provider changed from 100ms to **LiveKit** during 2.H PR-2. Rationale:
+
+- **No prebuilt-UI advantage to forgo.** The Figma file ("Skalechat Files") has
+  zero call-screen designs, so the call UI is hand-rolled to the chat theme
+  regardless — which was 100ms's main edge (`<HMSPrebuilt>`). With that
+  neutralised, LiveKit's ~8× cheaper video, no-credit-card free tier, and
+  Apache-2.0 self-host escape decide it for a cost-conscious production app.
+- **Contained swap, as §7's escape plan predicted.** Only `hms.client.ts` →
+  `livekit.client.ts` (LiveKit `AccessToken` + async `toJwt()`,
+  `RoomServiceClient` create/delete with `maxParticipants:2` + `emptyTimeout`,
+  `WebhookReceiver` for signed webhooks), the `HMS_*` → `LIVEKIT_*` env prefix,
+  the webhook route (`/calls/webhooks/livekit`, `Authorization` header, raw
+  `application/webhook+json` body via a Fastify content-type parser in
+  `main.ts`), and the wire DTOs (`accessToken`/`roomName`/`wsUrl`). Lifecycle,
+  BullMQ ring-timeout, socket fan-out, CALL_EVENT rows untouched.
+  `CallSession.hms_room_id` DB column kept (stores the LiveKit room name) to
+  avoid a churny rename.
+- **Verified:** `/calls/token` mints a real LiveKit JWT + `wsUrl` against
+  `wss://sclaechat-p7znthtx.livekit.cloud`; e2e 49 pass / 6 todo; stub mode
+  (unset keys) still boots for keyless local dev.

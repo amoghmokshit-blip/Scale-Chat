@@ -103,5 +103,14 @@ export function dtoToMessage(m: MessageDto, counterpartId: string): Message {
       options: m.poll.options,
     };
   }
+  if (m.kind === 'CALL_EVENT') {
+    const text = m.text ?? 'Call';
+    return {
+      ...base,
+      type: 'call_event',
+      text,
+      callKind: text.toLowerCase().includes('video') ? 'VIDEO' : 'VOICE',
+    };
+  }
   return { ...base, type: 'text', text: m.text ?? '' };
 }

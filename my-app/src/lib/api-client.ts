@@ -1,5 +1,6 @@
 import Constants from 'expo-constants';
 
+import { chatSocket } from './chat-socket';
 import { StorageKeys, storage } from './mmkv';
 
 /**
@@ -87,6 +88,12 @@ async function performRefresh(): Promise<TokenPair> {
   }
   const json = (await res.json()) as TokenPair;
   persistTokens(json);
+  // Symmetric to login (api-auth-repository.ts → chatSocket.restart()): reopen the
+  // chat socket with the fresh token. The socket bakes the bearer into its handshake
+  // at connect time, so a refresh alone leaves it authenticating with the stale token
+  // (presence never registers; message:new / call:ring never arrive). Fire-and-forget
+  // so we never block the REST retry.
+  void chatSocket.restart();
   return json;
 }
 

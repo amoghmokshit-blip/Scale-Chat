@@ -12,10 +12,10 @@ import { z } from 'zod';
  *
  * Wire shapes:
  *   - POST  /calls/token               body: CallTokenRequest → CallTokenResponse
- *   - POST  /calls/:callId/accept      → { hmsToken, expiresAt }
+ *   - POST  /calls/:callId/accept      → CallAcceptResponse
  *   - POST  /calls/:callId/decline     → 204
  *   - POST  /calls/:callId/hangup      → 204
- *   - POST  /calls/webhooks/100ms      (HMAC-signed) → 200
+ *   - POST  /calls/webhooks/livekit    (JWT-signed Authorization header) → 200
  *   - GET   /chats/:chatId/calls       → { items: CallSummary[] }
  *
  * Socket events (per-viewer via the existing `user:{userId}` room joined on
@@ -69,18 +69,25 @@ export const CallTokenRequestSchema = z.object({
 });
 export type CallTokenRequestBody = z.infer<typeof CallTokenRequestSchema>;
 
-/** Returned by POST /calls/token (initiator) and POST /calls/:callId/accept (callee). */
+/**
+ * Returned by POST /calls/token (initiator). `wsUrl` + `accessToken` are what
+ * `@livekit/react-native` `Room.connect(wsUrl, accessToken)` needs; `roomName`
+ * is carried for display/debugging (the token already encodes the room grant).
+ */
 export const CallTokenResponseSchema = z.object({
   callId: z.string().uuid(),
-  hmsRoomId: z.string().min(1),
-  hmsToken: z.string().min(1),
+  roomName: z.string().min(1),
+  accessToken: z.string().min(1),
+  wsUrl: z.string().min(1),
   expiresAt: z.string().datetime(),
 });
 export type CallTokenResponse = z.infer<typeof CallTokenResponseSchema>;
 
-/** Pared-down `CallTokenResponse` returned by /accept (the callId is already known to the caller). */
+/** Returned by /accept (the callId is already known to the caller). */
 export const CallAcceptResponseSchema = z.object({
-  hmsToken: z.string().min(1),
+  roomName: z.string().min(1),
+  accessToken: z.string().min(1),
+  wsUrl: z.string().min(1),
   expiresAt: z.string().datetime(),
 });
 export type CallAcceptResponse = z.infer<typeof CallAcceptResponseSchema>;
@@ -115,7 +122,7 @@ export type CallListResponse = z.infer<typeof CallListResponseSchema>;
 export const SocketCallRingSchema = z.object({
   callId: z.string().uuid(),
   chatId: z.string().uuid(),
-  hmsRoomId: z.string().min(1),
+  roomName: z.string().min(1),
   kind: CallKindEnum,
   initiator: CallParticipantSchema,
   ringExpiresAt: z.string().datetime(),

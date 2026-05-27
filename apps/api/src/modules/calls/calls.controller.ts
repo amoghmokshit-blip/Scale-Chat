@@ -33,7 +33,7 @@ import { CallsService } from './calls.service';
  *   POST   /calls/:callId/accept              JWT — callee accepts (lock-protected)
  *   POST   /calls/:callId/decline             JWT — callee declines
  *   POST   /calls/:callId/hangup              JWT — either peer hangs up
- *   POST   /calls/webhooks/100ms              (HMAC-signed)
+ *   POST   /calls/webhooks/livekit            (LiveKit-signed Authorization JWT)
  *   GET    /chats/:chatId/calls               JWT — per-chat history
  *
  * Two controllers because the path prefix splits between /calls and
@@ -84,24 +84,26 @@ export class CallsController {
 }
 
 /**
- * Webhook is unauthenticated (signed via HMAC-SHA256 header). Separated
- * into its own controller so the JwtAuthGuard doesn't trip on it.
+ * Webhook is unauthenticated (LiveKit signs a JWT over the body's sha256 and
+ * sends it in the `Authorization` header). Separated into its own controller
+ * so the JwtAuthGuard doesn't trip on it. The `application/webhook+json`
+ * content-type parser registered in `main.ts` makes `req.body` the raw Buffer
+ * (LiveKit's `WebhookReceiver` needs the exact bytes to verify the signature).
  */
 @Controller('calls/webhooks')
 export class CallsWebhookController {
   constructor(private readonly calls: CallsService) {}
 
-  @Post('100ms')
+  @Post('livekit')
   @HttpCode(200)
   async receive(
     @Req() req: FastifyRequest,
-    @Headers('x-hms-signature') signature: string | undefined,
+    @Headers('authorization') authHeader: string | undefined,
   ): Promise<{ ok: true }> {
-    // Fastify exposes the raw body via `req.rawBody` when the per-route
-    // contentType parser preserves it. For PR-1 we re-serialise the parsed
-    // body to a Buffer (good enough until PR-2 wires the rawBody parser).
-    const rawBody = Buffer.from(JSON.stringify(req.body ?? {}), 'utf8');
-    await this.calls.handleWebhook(rawBody, signature);
+    const rawBody = Buffer.isBuffer(req.body)
+      ? (req.body as Buffer)
+      : Buffer.from(typeof req.body === 'string' ? req.body : JSON.stringify(req.body ?? {}), 'utf8');
+    await this.calls.handleWebhook(rawBody, authHeader);
     return { ok: true };
   }
 }

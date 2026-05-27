@@ -1,7 +1,12 @@
 import type {
   BlockStatusResponse,
+  CallAcceptResponse,
+  CallKind,
+  CallSummary,
+  CallTokenResponse,
   ClearChatResponse,
   CommonGroupsListResponse,
+  DevicePlatform,
   MuteChatResponse,
   ReportReason,
   UserProfileCard,
@@ -146,6 +151,22 @@ export interface ChatRepository {
   votePoll?(messageId: string, optionIds: string[]): Promise<void>;
   /** Close a poll (sender-only). Idempotent if already closed. */
   closePoll?(messageId: string): Promise<void>;
+  /**
+   * Start a 1-on-1 call (Tranche 2.H/2.I). `POST /calls/token` → callId + a
+   * LiveKit `accessToken` + `roomName` + `wsUrl` for `Room.connect`. The server
+   * also rings the callee (socket + push).
+   */
+  startCall?(threadId: string, kind: CallKind): Promise<CallTokenResponse>;
+  /** Accept an incoming call. `POST /calls/:id/accept` → LiveKit token + wsUrl. */
+  acceptCall?(callId: string): Promise<CallAcceptResponse>;
+  /** Decline an incoming call. `POST /calls/:id/decline`. */
+  declineCall?(callId: string): Promise<void>;
+  /** End an active call (either peer). `POST /calls/:id/hangup`. */
+  hangupCall?(callId: string): Promise<void>;
+  /** Per-thread call history. `GET /chats/:id/calls`. */
+  listCallsInThread?(threadId: string): Promise<CallSummary[]>;
+  /** Register this device's Expo push token for call wakeup. `POST /push/tokens`. */
+  registerPushToken?(expoPushToken: string, platform: DevicePlatform): Promise<void>;
   /** Subscribe to repository changes (any thread/message update). */
   subscribe(listener: () => void): () => void;
 }

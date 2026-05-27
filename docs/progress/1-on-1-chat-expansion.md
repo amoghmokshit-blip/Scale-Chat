@@ -621,11 +621,11 @@ Backend foundation for voice/video calls. NO mobile UI — verified with curl + 
 |---|---|---|---|
 | **H.0** Socket `user:{userId}` room + multi-device semantics | n/a | ✅ (2026-05-26, 2.F PR-1) | Landed early as part of 2.F's `emitPollVoted` per-viewer broadcast. Same `user:{userId}` room now carries `call:ring` / `call:accepted` / `call:ended` / `call:taken` (2.H PR-1). First-accept-wins via `pg_advisory_xact_lock(callId)` enforced in `calls.service.ts:accept`. |
 | **H.1** Migration C — `CallSession` table | n/a | ✅ (2026-05-26, 2.H PR-1) | `20260528000000_add_call_sessions` — table + `call_kind` enum + `call_status` enum + 3 indexes + `call_event_message_id` UNIQUE back-ref. Prisma model with `@map` on every snake_case column (lesson from 2.F PR-1). |
-| **H.2** 100ms management client (`hms.client.ts`) | n/a | 🟡 stub (PR-1) → real in PR-2 | PR-1 stub returns synthetic room IDs + dev-signed tokens so e2e drives the flow end-to-end. PR-2 will wire the real `https://api.100ms.live/v2/rooms` POST + HS256 sign with `HMS_APP_SECRET`. Gated on the founder's live-test checklist in `docs/architecture/calls-provider-poc.md` § 6. |
+| **H.2** Provider client (`livekit.client.ts`) | n/a | ✅ (2026-05-26, 2.H PR-2 — **LiveKit**) | Provider switched 100ms→LiveKit (`docs/architecture/calls-provider-poc.md` §8.1). `livekit-server-sdk`: `AccessToken`+async `toJwt()` (identity=userId, 2h TTL, roomJoin grant), `RoomServiceClient.createRoom({maxParticipants:2, emptyTimeout:45})` + `deleteRoom` on hangup/missed. Env `LIVEKIT_API_KEY/SECRET/URL` (optional → stub mode for keyless dev). Verified: real JWT+wsUrl minted against the live cloud. |
 | **H.3** `CallsModule` REST surface | n/a | ✅ (2026-05-26, 2.H PR-1) | 6 routes across 3 controllers: `CallsController` (token/accept/decline/hangup), `CallsWebhookController` (100ms webhook, no JWT), `CallsHistoryController` (`GET /chats/:chatId/calls`). |
 | **H.4** Socket events `call:ring` / `call:accepted` / `call:ended` / `call:taken` | n/a | ✅ (2026-05-26, 2.H PR-1) | Added to `messages.gateway.ts` as `emitCallRing/Accepted/Ended/Taken` — all per-user broadcasts on `user:{userId}` (H.0). |
 | **H.5** 30s ring-timeout via **BullMQ delayed job** | n/a | ✅ (2026-05-26, 2.H PR-1) | New `BullMQModule` (global) + `CallsRingTimeoutProcessor` Worker. `jobId: callId` → accept/decline cancel by id. `bullmq@^5.77` installed; reuses the existing ioredis client (already configured with `maxRetriesPerRequest: null` for BullMQ compat). Tests bypass via `callsService.onRingTimeout(callId)` direct call. |
-| **H.6** Webhook handler `/calls/webhooks/100ms` | n/a | 🟡 stub (PR-1) → real in PR-2 | PR-1 rejects every signature with 403 (e2e case 8 asserts this). PR-2 adds real `HMAC-SHA256(rawBody, HMS_WEBHOOK_SECRET)` constant-time verify + event parser (`session.close.success` → sync `durationSec`). Fastify raw-body parser needs per-route override (see plan §Cross-cutting risks). |
+| **H.6** Webhook handler `/calls/webhooks/livekit` | n/a | ✅ (2026-05-26, 2.H PR-2) | LiveKit `WebhookReceiver` verifies the signed `Authorization` JWT over the raw `application/webhook+json` body (Fastify content-type parser added in `main.ts`). On `room_finished`, idempotently transitions ACCEPTED→COMPLETED (the app-killed fallback) under the call advisory lock. Bad/unverified → 403 (e2e case 8). Case 9 (good-sig) is `it.todo` pending test LiveKit creds. |
 | **H.7** Block-aware token mint | n/a | ✅ (2026-05-26, 2.H PR-1) | `BlocksService.isBlockedEitherWay` check in `calls.service.ts:mintToken`. E2e case 2 green. |
 | **H.8** CALL_EVENT message thread row | n/a | ✅ (2026-05-26, 2.H PR-1) | Server-authored via `MessagesService.createServerAuthored` (introduced 2.F PR-1). Inserted on every terminal transition (DECLINED / MISSED / COMPLETED) with `clientMessageId: 'call-{callId}-{reason}'` for idempotency. Client-CALL_EVENT rejected 400 (e2e case 10). |
 
@@ -734,23 +734,26 @@ All four optional (mirror `R2_*` pattern at `media.service.ts:65-74`); if any un
 
 ---
 
-## Tranche 2.I — Call UI + push wakeup
+## Tranche 2.I — Call UI + push wakeup ✅ LANDED 2026-05-26
 
-Final tranche. Wires the 100ms RN SDK + the IncomingCallScreen + push notifications. **First tranche to require a custom dev client** (100ms native; loses Expo Go).
+Final tranche. Wires the **LiveKit** RN SDK (provider switched from 100ms — see calls-provider-poc.md §8.1) + IncomingCallScreen + CallScreen + Expo push wakeup. **Custom dev client** (LiveKit/WebRTC native; loses Expo Go). Native build verified compiling/installing on RN 0.85; whole app `expo export`-bundles clean; backend e2e 53 pass / 6 todo; real LiveKit token+room verified against the cloud.
 
 ### Status table
 
 | Sub-item | Frontend | Backend | Notes |
 |---|---|---|---|
-| **I.1** Migration D — `UserDevice` table | n/a | 🚫 | `expoPushToken UNIQUE`, platform, lastActiveAt |
-| **I.2** `PushModule` | n/a | 🚫 | `POST /push/tokens` upsert; `notify({ userIds, payload, opts })` |
-| **I.3** Mute-aware push filter | n/a | 🚫 | Skip muted memberships EXCEPT for `call:ring` |
-| **I.4** 100ms SDK install + plugin block | 🚫 | n/a | `@100mslive/react-native-hms` + `@100mslive/react-native-room-kit` |
-| **I.5** `app/call/[callId].tsx` CallScreen | 🚫 | n/a | Renders `<HMSPrebuilt>`; onLeave → hangup |
-| **I.6** `app/call/incoming/[callId].tsx` IncomingCallScreen | 🚫 | n/a | Ring/accept/decline state machine |
-| **I.7** `CallRingListener` shell mount | 🚫 | n/a | Global socket listener for `call:ring` |
-| **I.8** Push wakeup → IncomingCallScreen | 🚫 | n/a | `expo-notifications` handler routes to incoming screen |
-| **I.9** ComingSoonSheet voice/video keys removed | 🚫 | n/a | Disconnect from `chat-header.tsx`; keep for chatTheme + exportChat per CLAUDE.md row |
+| **I.1** Migration D — `UserDevice` table | n/a | ✅ | `20260529000000_add_user_devices`: `expo_push_token` UNIQUE, platform, lastActiveAt, FK CASCADE |
+| **I.2** `PushModule` | n/a | ✅ | `POST/DELETE /push/tokens` upsert; `notifyCall()` via fetch to Expo push (SDK is ESM-only). Prunes DeviceNotRegistered. |
+| **I.3** Mute-aware push | n/a | ✅ | `notifyCall` is call:ring → ALWAYS sends (never mute-suppressed); inline (no queue — 1-on-1 = single callee) |
+| **I.4** Provider SDK install + plugins | ✅ | n/a | `@livekit/react-native` + `@livekit/react-native-webrtc` + `@config-plugins/react-native-webrtc` + `@livekit/react-native-expo-plugin` + `expo-notifications` + `livekit-client`. app.json plugins + K2 heap plugin. |
+| **I.5** `chat/call.tsx` CallScreen | ✅ | n/a | `<LiveKitRoom>` (audio always, video for VIDEO) + mute/camera/hangup; abnormal-termination → hangup; AudioSession (K5) |
+| **I.6** `chat/incoming-call.tsx` IncomingCallScreen | ✅ | n/a | Caller card from ring payload; accept/decline; auto-dismiss on call:taken/ended |
+| **I.7** `CallRingListener` shell mount | ✅ | n/a | Global `onCallRing` (+ background push) → route to incoming-call; `registerGlobals()` in root layout |
+| **I.8** Push wakeup → IncomingCallScreen | ✅ | n/a | `expo-notifications` response listener routes a `call:ring` data payload |
+| **I.9** ComingSoonSheet voice/video keys removed | ✅ | n/a | Header buttons now `startCall`; comingSoon kept for chatTheme + exportChat |
+| **I.10** EAS + iOS scaffold | ✅ | n/a | eas.json Android apk/aab + iOS sim profile; `docs/architecture/ios-enablement-checklist.md` (Android-now, iOS-on-Apple-cert) |
+| **I.11** Socket reconnect on token refresh | ✅ | n/a | **Post-2-party-QA fix.** `api-client.performRefresh` now `void chatSocket.restart()` after `persistTokens` — symmetric to login (`api-auth-repository.ts`). Before: a stored-session launch baked the *expired* access token into the Socket.IO handshake and auto-retried it forever (REST self-heals via 401→refresh, but the WS never did) → `presence:count` stayed 0, `call:ring`/`message:new` never arrived. Now the first REST 401→refresh reopens the WS with the fresh token (aged-session launch self-heals; no re-login). **Verified live 2026-05-26** — an ~88-min-idle callee reconnected on the next REST and rang. |
+| **I.12** Call-permission pre-gate | ✅ | n/a | **Post-2-party-QA fix.** New `src/lib/call-permissions.ts ensureCallPermissions(kind)` (mic always + camera for VIDEO via existing `expo-audio`/`expo-image-picker`) called at the top of `startCall` ([id].tsx) AND `accept` (incoming-call.tsx) BEFORE navigating to `/chat/call`. Before: `<LiveKitRoom audio connect>` triggered the OS mic dialog *mid-connect*; granting it fired a pre-connect signal → "cannot send signal request before connected" → `onError`→bounce on the callee's first call. Deny → Alert + caller aborts / callee `declineCall` (caller sees the declined pill, no 30s MISSED wait). Also: `incoming-call dismiss()` made idempotent (ring-timeout during the dialog no longer double-pops the stack); `call.tsx onError` → `leave(connectedRef.current)` so a never-connected call doesn't fire a hangup. **Verified live 2026-05-26** — caller-side mic pre-gate shows the dialog over the thread (not the CallScreen); callee accept connected with no mid-connect dialog/bounce. |
 
 ### Migration D — `20260529000000_add_user_devices`
 
@@ -963,6 +966,8 @@ cd my-app && npm run start
 **Tranche 2.H** — `curl` the 4 REST routes against a local API + 2 sockets in a node test script. No mobile yet.
 
 **Tranche 2.I** — must use the custom dev client. Tap voice → initiator sees CallScreen with audio toggle. Callee receives `call:ring` → IncomingCallScreen. Decline → CALL_EVENT pill "Voice call declined" in thread. Background app on callee → kill app → initiate call → push wakes app → IncomingCallScreen.
+
+> **✅ Verified live 2026-05-26 (two Android emulators, real LiveKit cloud).** Full 2-party voice call end-to-end: caller places → callee IncomingCallScreen ("Tester / Incoming voice call") → accept → both join the LiveKit room (`connecting → connected`, real `roomID`, `identity = userId`) → 90s+ connected call → hang up → `COMPLETED` with `duration_sec` → green "📞 Voice call · 1m 34s" CALL_EVENT pill on both threads. Caller-side WebRTC (offer/answer/ICE) + mic publish confirmed in logs. **I.11/I.12 fixes re-verified in a real call:** an ~88-min-idle callee (expired token, stale socket) reconnected on the next REST refresh via `chatSocket.restart()` (the `call:ring` then arrived — no re-login), and `accept` ran the mic pre-gate with no mid-connect dialog and no bounce. **Operational note:** after a long idle the WS reconnects on the *next* authenticated REST call (seamless in normal use since the app hits REST constantly; when manually driving emulators, open a chat first to nudge the reconnect before placing the call). IncomingCallScreen + CallScreen controls are RN `fullScreenModal`s and don't expose to `uiautomator` — drive accept/hangup by coordinates when scripting.
 
 ---
 

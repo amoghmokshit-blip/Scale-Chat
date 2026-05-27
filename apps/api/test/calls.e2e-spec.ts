@@ -97,7 +97,7 @@ describe('1-on-1 calls (REST happy path + edges)', () => {
     chatId: string,
     token: string,
     kind: 'VOICE' | 'VIDEO' = 'VOICE',
-  ): Promise<{ callId: string; hmsRoomId: string; hmsToken: string }> {
+  ): Promise<{ callId: string; roomName: string; accessToken: string; wsUrl: string }> {
     const r = await authedInject(testApp, {
       method: 'POST',
       url: '/calls/token',
@@ -105,7 +105,7 @@ describe('1-on-1 calls (REST happy path + edges)', () => {
       payload: { chatId, kind },
     });
     expect(r.statusCode).toBe(200);
-    return r.json<{ callId: string; hmsRoomId: string; hmsToken: string }>();
+    return r.json<{ callId: string; roomName: string; accessToken: string; wsUrl: string }>();
   }
 
   // ─── Case 1 — non-member token mint → 403 ─────────────────────────────────
@@ -299,20 +299,25 @@ describe('1-on-1 calls (REST happy path + edges)', () => {
   it('webhook bad signature → 403 invalid_webhook_signature', async () => {
     const res = await testApp.inject({
       method: 'POST',
-      url: '/calls/webhooks/100ms',
-      payload: { event: 'session.close.success', data: {} },
+      url: '/calls/webhooks/livekit',
+      payload: { event: 'room_finished', room: { name: 'x' } },
       headers: {
         'content-type': 'application/json',
-        'x-hms-signature': 'not-a-real-signature',
+        authorization: 'Bearer not-a-valid-livekit-jwt',
       },
     });
     expect(res.statusCode).toBe(403);
     expect(res.json<{ error: { code: string } }>().error.code).toBe('invalid_webhook_signature');
   });
 
-  // ─── Case 9 (PR-2 placeholder) — webhook good signature ───────────────────
+  // ─── Case 9 — webhook good signature (real LiveKit JWT) ───────────────────
+  // Needs LIVEKIT_API_KEY/SECRET in the test env to forge a valid signed
+  // webhook (LiveKit's WebhookReceiver verifies a JWT over the body sha256).
+  // Deferred until the e2e harness injects test LiveKit creds — the happy-path
+  // call completion is already covered by the hangup case (7); the webhook is
+  // only the app-killed fallback.
 
-  it.todo('webhook good signature updates durationSec (PR-2 — real HMAC + event parser)');
+  it.todo('webhook good signature transitions ACCEPTED→COMPLETED (needs test LiveKit creds)');
 
   // ─── Case 10 — client-supplied CALL_EVENT rejected ────────────────────────
 

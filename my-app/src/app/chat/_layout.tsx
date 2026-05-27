@@ -28,6 +28,16 @@ export default function ChatLayout() {
         name="compose-poll"
         options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
       />
+      {/* Calls (Tranche 2.I) — full-screen, gesture-locked so a swipe can't
+          dismiss a live call. IncomingCall slides up; CallScreen fades in. */}
+      <Stack.Screen
+        name="incoming-call"
+        options={{ presentation: 'fullScreenModal', animation: 'slide_from_bottom', gestureEnabled: false }}
+      />
+      <Stack.Screen
+        name="call"
+        options={{ presentation: 'fullScreenModal', animation: 'fade', gestureEnabled: false }}
+      />
     </Stack>
   );
 }

@@ -1,6 +1,10 @@
 import Constants from 'expo-constants';
 import {
   type MessageDto,
+  type SocketCallAccepted,
+  type SocketCallEnded,
+  type SocketCallRing,
+  type SocketCallTaken,
   type SocketMessageDeleted,
   type SocketMessagePinned,
   type SocketMessageUnpinned,
@@ -45,6 +49,10 @@ type Listeners = {
   messagePinned: Set<(p: SocketMessagePinned) => void>;
   messageUnpinned: Set<(p: SocketMessageUnpinned) => void>;
   pollVoted: Set<(p: SocketPollVoted) => void>;
+  callRing: Set<(r: SocketCallRing) => void>;
+  callAccepted: Set<(a: SocketCallAccepted) => void>;
+  callEnded: Set<(e: SocketCallEnded) => void>;
+  callTaken: Set<(t: SocketCallTaken) => void>;
   connectionChange: Set<(connected: boolean) => void>;
 };
 
@@ -68,6 +76,10 @@ class ChatSocketManager {
     messagePinned: new Set(),
     messageUnpinned: new Set(),
     pollVoted: new Set(),
+    callRing: new Set(),
+    callAccepted: new Set(),
+    callEnded: new Set(),
+    callTaken: new Set(),
     connectionChange: new Set(),
   };
 
@@ -258,6 +270,32 @@ class ChatSocketManager {
     return () => this.listeners.pollVoted.delete(listener);
   }
 
+  // ─── Call signalling (Tranche 2.H/2.I — per-user `user:{userId}` room) ──────
+
+  /** Incoming call for this user (all their devices). Drives IncomingCallScreen. */
+  onCallRing(listener: (r: SocketCallRing) => void): () => void {
+    this.listeners.callRing.add(listener);
+    return () => this.listeners.callRing.delete(listener);
+  }
+
+  /** A call was accepted (both peers) — caller transitions to CallScreen. */
+  onCallAccepted(listener: (a: SocketCallAccepted) => void): () => void {
+    this.listeners.callAccepted.add(listener);
+    return () => this.listeners.callAccepted.delete(listener);
+  }
+
+  /** A call ended (declined/missed/hangup/webhook) — dismiss call UI + show CALL_EVENT. */
+  onCallEnded(listener: (e: SocketCallEnded) => void): () => void {
+    this.listeners.callEnded.add(listener);
+    return () => this.listeners.callEnded.delete(listener);
+  }
+
+  /** Another of this user's devices accepted — dismiss our IncomingCallScreen. */
+  onCallTaken(listener: (t: SocketCallTaken) => void): () => void {
+    this.listeners.callTaken.add(listener);
+    return () => this.listeners.callTaken.delete(listener);
+  }
+
   onConnectionChange(listener: (connected: boolean) => void): () => void {
     this.listeners.connectionChange.add(listener);
     return () => this.listeners.connectionChange.delete(listener);
@@ -295,6 +333,18 @@ class ChatSocketManager {
     });
     socket.on(SocketEvents.pollVoted, (p: SocketPollVoted) => {
       this.listeners.pollVoted.forEach((l) => l(p));
+    });
+    socket.on(SocketEvents.callRing, (r: SocketCallRing) => {
+      this.listeners.callRing.forEach((l) => l(r));
+    });
+    socket.on(SocketEvents.callAccepted, (a: SocketCallAccepted) => {
+      this.listeners.callAccepted.forEach((l) => l(a));
+    });
+    socket.on(SocketEvents.callEnded, (e: SocketCallEnded) => {
+      this.listeners.callEnded.forEach((l) => l(e));
+    });
+    socket.on(SocketEvents.callTaken, (t: SocketCallTaken) => {
+      this.listeners.callTaken.forEach((l) => l(t));
     });
   }
 

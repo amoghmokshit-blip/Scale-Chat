@@ -31,6 +31,17 @@ async function bootstrap(): Promise<void> {
   // Replace the default logger with pino as soon as the container is ready.
   app.useLogger(app.get(PinoLogger));
 
+  // LiveKit posts webhooks as `application/webhook+json`. Preserve the exact
+  // raw bytes (no JSON re-parse) so the calls webhook controller can hand them
+  // to LiveKit's `WebhookReceiver`, which verifies the signed `Authorization`
+  // JWT against a sha256 of the body. Any re-serialisation would break it.
+  const fastify = app.getHttpAdapter().getInstance();
+  fastify.addContentTypeParser(
+    'application/webhook+json',
+    { parseAs: 'buffer' },
+    (_req, body, done) => done(null, body),
+  );
+
   await app.register(helmet, { contentSecurityPolicy: false });
 
   app.enableCors({

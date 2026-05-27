@@ -49,6 +49,7 @@ model User {
   pollVotes       PollVote[]     @relation("UserPollVotes")
   callsInitiated  CallSession[]  @relation("CallInitiator")
   callsReceived   CallSession[]  @relation("CallCallee")
+  devices         UserDevice[]   @relation("UserDevices")
 
   @@index([phoneE164])
   @@map("users")
@@ -618,4 +619,32 @@ enum CallStatus {
   COMPLETED
 
   @@map("call_status")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Push device registry (Tranche 2.I — call wakeup via Expo push)
+//
+// One row per (device) Expo push token. The token is the natural key —
+// reinstalling/reissuing rotates it, so we upsert on it and reassign userId.
+// Platform-agnostic: Expo's push service fans out to FCM (Android) + APNs (iOS).
+
+model UserDevice {
+  id            String         @id @default(uuid()) @db.Uuid
+  userId        String         @db.Uuid @map("user_id")
+  expoPushToken String         @unique @db.VarChar(200) @map("expo_push_token")
+  platform      DevicePlatform
+  lastActiveAt  DateTime       @default(now()) @db.Timestamptz(6) @map("last_active_at")
+  createdAt     DateTime       @default(now()) @db.Timestamptz(6) @map("created_at")
+
+  user          User           @relation("UserDevices", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId], map: "user_devices_by_user_idx")
+  @@map("user_devices")
+}
+
+enum DevicePlatform {
+  IOS
+  ANDROID
+
+  @@map("device_platform")
 }

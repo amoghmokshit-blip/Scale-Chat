@@ -74,6 +74,25 @@ export function MessageBubble({
   // advertise a pin).
   const isPinned = message.pinnedAt != null && !isTombstone;
 
+  // Call log (Tranche 2.I) — a centered system pill, not a left/right bubble.
+  if (message.type === 'call_event') {
+    const lower = message.text.toLowerCase();
+    const missed = lower.includes('missed') || lower.includes('declined');
+    return (
+      <View style={styles.callEventRow}>
+        <View style={styles.callEventPill}>
+          <Feather
+            name={message.callKind === 'VIDEO' ? 'video' : missed ? 'phone-missed' : 'phone'}
+            size={13}
+            color={missed ? '#E5677B' : Brand.chatActionLime}
+          />
+          <ThemedText style={styles.callEventText}>{message.text}</ThemedText>
+          <ThemedText style={styles.callEventTime}>{formatBubbleTime(message.createdAt)}</ThemedText>
+        </View>
+      </View>
+    );
+  }
+
   // Image + video bubbles render the media as the entire bubble surface — no
   // rounded chat-bubble background underneath; the reply quote renders inline
   // above the media to keep the layout clean. (Video reuses this branch's
@@ -299,6 +318,29 @@ const styles = StyleSheet.create({
   outer: {
     paddingHorizontal: Spacing.three + 2,
     marginBottom: 6,
+  },
+  callEventRow: {
+    alignItems: 'center',
+    marginVertical: 6,
+    paddingHorizontal: Spacing.three,
+  },
+  callEventPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: Brand.chatDayPill,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  callEventText: {
+    fontSize: 12.5,
+    color: '#D8D8D8',
+    fontWeight: FontWeight.medium,
+  },
+  callEventTime: {
+    fontSize: 11,
+    color: '#8C8C8C',
   },
   bubble: {
     maxWidth: '78%',

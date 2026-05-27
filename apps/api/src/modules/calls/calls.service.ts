@@ -8,11 +8,13 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { CallStatus, Prisma } from '@prisma/client';
 import type {
+  CallAcceptResponse,
   CallEndReason,
   CallKind,
   CallListResponse,
@@ -28,7 +30,8 @@ import type { Env } from '../../config/env';
 import { BlocksService } from '../blocks/blocks.service';
 import { MessagesGateway } from '../messages/messages.gateway';
 import { MessagesService } from '../messages/messages.service';
-import { HmsClient } from './hms.client';
+import { LiveKitClient } from './livekit.client';
+import { PushService } from '../push/push.service';
 
 /**
  * Calls signalling service — Tranche 2.H (1-on-1 scope).
@@ -79,9 +82,10 @@ export class CallsService {
     private readonly messages: MessagesService,
     private readonly blocks: BlocksService,
     private readonly gateway: MessagesGateway,
-    private readonly hms: HmsClient,
+    private readonly livekit: LiveKitClient,
     private readonly config: ConfigService<Env, true>,
     @Inject(CALL_RING_QUEUE) private readonly ringQueue: Queue,
+    @Optional() private readonly pushService?: PushService,
   ) {
     this.ringTimeoutMs = this.config.get('BULLMQ_RING_TIMEOUT_MS', { infer: true }) ?? 30_000;
   }
@@ -141,12 +145,11 @@ export class CallsService {
     //    carry it (debugging — `chat-{chatId}-{callId}` makes 100ms dashboard
     //    rooms greppable).
     const callId = randomUUID();
-    const room = await this.hms.createRoom({
+    const room = await this.livekit.createRoom({
       name: `chat-${chatId}-${callId}`.slice(0, 64),
-      description: `1-on-1 ${kind.toLowerCase()} call`,
     });
 
-    // 4. Insert CallSession in RINGING.
+    // 4. Insert CallSession in RINGING. (hmsRoomId stores the LiveKit room name.)
     await this.prisma.callSession.create({
       data: {
         id: callId,
@@ -159,9 +162,9 @@ export class CallsService {
       },
     });
 
-    // 5. Mint the initiator's HS256 client token.
-    const initiatorToken = this.hms.mintClientToken({
-      hmsRoomId: room.id,
+    // 5. Mint the initiator's LiveKit access token.
+    const initiatorToken = await this.livekit.mintClientToken({
+      roomName: room.id,
       userId: initiatorUserId,
     });
 
@@ -176,7 +179,7 @@ export class CallsService {
     const ringPayload: SocketCallRing = {
       callId,
       chatId,
-      hmsRoomId: room.id,
+      roomName: room.id,
       kind,
       initiator: {
         id: initiatorProfile?.id ?? initiatorUserId,
@@ -198,23 +201,30 @@ export class CallsService {
       },
     );
 
-    // 8. (Future / Tranche 2.I): push wakeup for offline devices.
-    //    `pushService?.notify({ userIds: [calleeUserId], payload: { type: 'call:ring', ... } })`.
+    // 8. Push wakeup for backgrounded callee devices (Tranche 2.I). Best-effort
+    //    + inline (1-on-1 = single callee); the socket call:ring already covers
+    //    online devices. Never suppressed by mute — a ringing call must ring.
+    await this.pushService?.notifyCall(calleeUserId, {
+      callId,
+      chatId,
+      kind,
+      roomName: room.id,
+      initiatorName: initiatorProfile?.fullName ?? 'Someone',
+      ringExpiresAt: ringExpiresAt.toISOString(),
+    });
 
     return {
       callId,
-      hmsRoomId: room.id,
-      hmsToken: initiatorToken.token,
+      roomName: room.id,
+      accessToken: initiatorToken.token,
+      wsUrl: initiatorToken.wsUrl,
       expiresAt: initiatorToken.expiresAt,
     };
   }
 
   // ─── Accept (callee) ───────────────────────────────────────────────────────
 
-  async accept(acceptingUserId: string, callId: string): Promise<{
-    hmsToken: string;
-    expiresAt: string;
-  }> {
+  async accept(acceptingUserId: string, callId: string): Promise<CallAcceptResponse> {
     const row = await this.loadCallForWrite(callId, acceptingUserId, 'callee');
 
     // pg_advisory_xact_lock + state-check inside the transaction. Two
@@ -261,12 +271,17 @@ export class CallsService {
     this.gateway.emitCallAccepted(row.calleeUserId, { callId });
     this.gateway.emitCallTaken(row.calleeUserId, { callId });
 
-    // Mint the callee's HS256 client token for the same room.
-    const calleeToken = this.hms.mintClientToken({
-      hmsRoomId: acceptedRoom.hmsRoomId,
+    // Mint the callee's LiveKit access token for the same room.
+    const calleeToken = await this.livekit.mintClientToken({
+      roomName: acceptedRoom.hmsRoomId,
       userId: acceptingUserId,
     });
-    return { hmsToken: calleeToken.token, expiresAt: calleeToken.expiresAt };
+    return {
+      roomName: acceptedRoom.hmsRoomId,
+      accessToken: calleeToken.token,
+      wsUrl: calleeToken.wsUrl,
+      expiresAt: calleeToken.expiresAt,
+    };
   }
 
   // ─── Decline (callee) ──────────────────────────────────────────────────────
@@ -336,12 +351,12 @@ export class CallsService {
       return { durationSec, hmsRoomId: fresh.hmsRoomId };
     });
 
-    // Best-effort: disable the 100ms room so it can't be re-joined.
+    // Best-effort: delete the LiveKit room so it can't be re-joined.
     if (summary.hmsRoomId) {
       try {
-        await this.hms.disableRoom(summary.hmsRoomId);
+        await this.livekit.disableRoom(summary.hmsRoomId);
       } catch (err) {
-        this.log.warn({ err, callId }, 'hms.disableRoom failed (non-fatal)');
+        this.log.warn({ err, callId }, 'livekit.disableRoom failed (non-fatal)');
       }
     }
     this.broadcastEnded(row.initiatorUserId, row.calleeUserId, callId, 'hangup', summary.durationSec);
@@ -365,6 +380,7 @@ export class CallsService {
       initiatorUserId: string;
       calleeUserId: string;
       kind: CallKind;
+      roomName: string | null;
     } | { ok: false };
     try {
       result = await this.prisma.$transaction(async (tx) => {
@@ -395,6 +411,7 @@ export class CallsService {
           initiatorUserId: row.initiatorUserId,
           calleeUserId: row.calleeUserId,
           kind: row.kind,
+          roomName: row.hmsRoomId,
         };
       });
     } catch (err) {
@@ -402,24 +419,82 @@ export class CallsService {
       return;
     }
     if (!result.ok) return; // already accepted/declined; nothing to do
+    // Best-effort: tear down the unanswered room (also self-cleans via emptyTimeout).
+    if (result.roomName) {
+      try {
+        await this.livekit.disableRoom(result.roomName);
+      } catch (err) {
+        this.log.warn({ err, callId }, 'livekit.disableRoom on missed failed (non-fatal)');
+      }
+    }
     this.broadcastEnded(result.initiatorUserId, result.calleeUserId, callId, 'missed', null);
   }
 
-  // ─── Webhook (100ms) ───────────────────────────────────────────────────────
+  // ─── Webhook (LiveKit) ─────────────────────────────────────────────────────
 
   /**
-   * 100ms webhook handler. PR-1 stub: verifies signature with HmsClient.
-   * Real event handling (sync `durationSec` from `session.close.success`)
-   * lands in PR-2.
+   * LiveKit webhook handler. Verifies the signed `Authorization` JWT, then on
+   * `room_finished` syncs an ACCEPTED call to COMPLETED — the fallback that
+   * closes a call whose client was killed before it could POST /hangup.
+   * Idempotent: only transitions if still ACCEPTED (so LiveKit retries + a
+   * prior client hangup are both no-ops).
    */
-  async handleWebhook(rawBody: Buffer, signature: string | undefined): Promise<void> {
-    if (!this.hms.verifyWebhookSignature(rawBody, signature)) {
+  async handleWebhook(rawBody: Buffer, authHeader: string | undefined): Promise<void> {
+    const event = await this.livekit.verifyWebhook(rawBody, authHeader);
+    if (!event) {
       throw new ForbiddenException({
         code: 'invalid_webhook_signature',
         message: 'Webhook signature verification failed.',
       });
     }
-    // PR-2 will parse the event + sync durationSec on session.close.success.
+    if (event.event === 'room_finished' && event.room?.name) {
+      await this.completeFromWebhook(event.room.name);
+    }
+    // Other events (participant_joined/left, track_*) are ignored in v1.
+  }
+
+  /** Idempotent ACCEPTED→COMPLETED transition driven by a verified room_finished. */
+  private async completeFromWebhook(roomName: string): Promise<void> {
+    const result = await this.prisma.$transaction(async (tx) => {
+      const found = await tx.callSession.findFirst({
+        where: { hmsRoomId: roomName },
+        select: { id: true },
+      });
+      if (!found) return { ok: false as const };
+      await tx.$executeRawUnsafe(
+        `SELECT pg_advisory_xact_lock($1::bigint)`,
+        callIdToAdvisoryKey(found.id),
+      );
+      const fresh = await tx.callSession.findUnique({ where: { id: found.id } });
+      if (!fresh || fresh.status !== CallStatus.ACCEPTED) return { ok: false as const };
+      const endedAt = new Date();
+      const durationSec = fresh.startedAt
+        ? Math.max(0, Math.floor((endedAt.getTime() - fresh.startedAt.getTime()) / 1000))
+        : 0;
+      await tx.callSession.update({
+        where: { id: fresh.id },
+        data: { status: 'COMPLETED', endedAt, durationSec },
+      });
+      await this.insertCallEvent(
+        tx,
+        fresh.chatId,
+        fresh.initiatorUserId,
+        fresh.id,
+        fresh.kind as CallKind,
+        'webhook',
+        durationSec,
+      );
+      return {
+        ok: true as const,
+        callId: fresh.id,
+        initiatorUserId: fresh.initiatorUserId,
+        calleeUserId: fresh.calleeUserId,
+        durationSec,
+      };
+    });
+    if (result.ok) {
+      this.broadcastEnded(result.initiatorUserId, result.calleeUserId, result.callId, 'webhook', result.durationSec);
+    }
   }
 
   // ─── List (per-chat history) ───────────────────────────────────────────────

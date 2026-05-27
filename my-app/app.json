@@ -8,7 +8,12 @@
     "scheme": "myapp",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "bundleIdentifier": "com.surya_expo88.myapp",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "ScaleChat needs microphone access for voice and video calls.",
+        "NSCameraUsageDescription": "ScaleChat needs camera access for video calls."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -18,7 +23,8 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.surya_expo88.myapp"
+      "package": "com.surya_expo88.myapp",
+      "versionCode": 1
     },
     "web": {
       "output": "static",
@@ -62,7 +68,16 @@
         {
           "locationWhenInUsePermission": "ScaleChat needs your location to share where you are in a chat."
         }
-      ]
+      ],
+      "@config-plugins/react-native-webrtc",
+      "@livekit/react-native-expo-plugin",
+      [
+        "expo-notifications",
+        {
+          "color": "#208AEF"
+        }
+      ],
+      "./plugins/with-android-gradle-heap"
     ],
     "experiments": {
       "typedRoutes": true,

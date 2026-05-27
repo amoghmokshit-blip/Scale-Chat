@@ -196,6 +196,17 @@ export type PollMessage = MessageBase & {
   options: PollAggregate['options'];
 };
 
+/**
+ * Server-authored call-log row (Tranche 2.I) — rendered as a centered system
+ * pill, not a left/right bubble. `text` is the server label ("Missed voice
+ * call" / "Voice call · 4m 12s").
+ */
+export type CallEventMessage = MessageBase & {
+  type: 'call_event';
+  text: string;
+  callKind: 'VOICE' | 'VIDEO';
+};
+
 export type Message =
   | TextMessage
   | VoiceMessage
@@ -204,7 +215,8 @@ export type Message =
   | VideoMessage
   | LocationMessage
   | ContactCardMessage
-  | PollMessage;
+  | PollMessage
+  | CallEventMessage;
 
 export type SendMessageInput =
   | {

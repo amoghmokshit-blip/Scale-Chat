@@ -158,4 +158,24 @@ export const ChatCopy = {
       body: 'You’ll soon be able to email or save a chat transcript with or without media.',
     },
   },
+
+  /** Voice/Video call UI (Tranche 2.I). */
+  calls: {
+    incomingVoice: 'Incoming voice call',
+    incomingVideo: 'Incoming video call',
+    accept: 'Accept',
+    decline: 'Decline',
+    connecting: 'Connecting…',
+    reconnecting: 'Reconnecting…',
+    ringing: 'Ringing…',
+    endCall: 'End call',
+    mute: 'Mute',
+    unmute: 'Unmute',
+    speaker: 'Speaker',
+    flipCamera: 'Flip',
+    callFailed: 'Couldn’t connect the call',
+    permissionTitle: 'Permission needed',
+    permissionBody:
+      'ScaleChat needs microphone (and camera for video) access to place calls. Enable it in Settings.',
+  },
 } as const;

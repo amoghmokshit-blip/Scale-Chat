@@ -1,10 +1,16 @@
 import type {
   BlockStatusResponse,
+  CallAcceptResponse,
+  CallKind,
+  CallListResponse,
+  CallSummary,
+  CallTokenResponse,
   ChatDetailDto,
   ChatListResponse,
   ClearChatResponse,
   CommonGroupsListResponse,
   CreateMessageReportBody,
+  DevicePlatform,
   ForwardRequestBody,
   ForwardResponse,
   MediaUploadKind,
@@ -1194,6 +1200,35 @@ export const apiChatRepository: ChatRepository = {
       if (err instanceof ApiError && err.status === 401) throw err;
     }
     notify();
+  },
+
+  // ─── Calls (Tranche 2.H/2.I) ────────────────────────────────────────────────
+  // The CALL_EVENT thread rows arrive via the existing `message:new` socket
+  // path, so these are plain REST calls — no special call-cache handling.
+
+  async startCall(threadId, kind: CallKind) {
+    return apiClient.post<CallTokenResponse>('/calls/token', { chatId: threadId, kind });
+  },
+
+  async acceptCall(callId) {
+    return apiClient.post<CallAcceptResponse>(`/calls/${callId}/accept`, {});
+  },
+
+  async declineCall(callId) {
+    await apiClient.post<void>(`/calls/${callId}/decline`, {});
+  },
+
+  async hangupCall(callId) {
+    await apiClient.post<void>(`/calls/${callId}/hangup`, {});
+  },
+
+  async listCallsInThread(threadId) {
+    const res = await apiClient.get<CallListResponse>(`/chats/${threadId}/calls`);
+    return res.items as CallSummary[];
+  },
+
+  async registerPushToken(expoPushToken, platform: DevicePlatform) {
+    await apiClient.post<void>('/push/tokens', { expoPushToken, platform });
   },
 
   subscribe(listener) {
