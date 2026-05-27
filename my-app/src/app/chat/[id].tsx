@@ -207,8 +207,15 @@ export default function ChatThreadScreen() {
   // param (set by chat/search.tsx on hit tap), scroll to that message if it is already
   // in the loaded list. Out-of-window sequences (not yet loaded via loadOlder) are
   // deliberately ignored in this tranche — deep back-pagination is deferred.
+  //
+  // The ref prevents re-scrolling on every `items` change (incoming message, read
+  // receipt, reaction) — once we've scrolled to the hit for a given sequence we mark
+  // it handled and skip all subsequent fires with the same `highlightSequence` value.
+  const handledHighlightRef = useRef<string | null>(null);
   useEffect(() => {
     if (!highlightSequence) return;
+    // Already scrolled to this highlight — don't fight onContentSizeChange's scrollToEnd.
+    if (handledHighlightRef.current === highlightSequence) return;
     const seq = Number(highlightSequence);
     if (Number.isNaN(seq)) return;
     const index = items.findIndex(
@@ -216,6 +223,7 @@ export default function ChatThreadScreen() {
     );
     if (index < 0) return; // message not in loaded window — do nothing this tranche
     listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
+    handledHighlightRef.current = highlightSequence;
   }, [highlightSequence, items]);
 
   const renderItem: ListRenderItem<ListItem> = ({ item }) => {
