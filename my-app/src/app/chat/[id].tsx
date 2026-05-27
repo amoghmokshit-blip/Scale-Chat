@@ -44,6 +44,7 @@ import {
 import { useThread } from '@/features/chat/hooks/use-thread';
 import { chatRepository } from '@/features/chat/data';
 import { ApiError } from '@/lib/api-client';
+import { ensureCallPermissions } from '@/lib/call-permissions';
 import { formatDayLabel } from '@/lib/format-time';
 import { truncateFileName, validateMediaPick } from '@/lib/media-pick';
 
@@ -116,6 +117,13 @@ export default function ChatThreadScreen() {
   const startCall = useCallback(
     async (kind: 'VOICE' | 'VIDEO') => {
       if (!id) return;
+      // Pre-grant mic (+ camera for video) BEFORE navigating to the CallScreen so
+      // the OS dialog never interrupts the LiveKit connect (see call-permissions.ts).
+      const ok = await ensureCallPermissions(kind);
+      if (!ok) {
+        Alert.alert(ChatCopy.calls.permissionTitle, ChatCopy.calls.permissionBody);
+        return;
+      }
       try {
         const res = await chatRepository.startCall?.(id, kind);
         if (!res) return;

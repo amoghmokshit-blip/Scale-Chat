@@ -34,6 +34,12 @@ export default function CallScreen() {
   const isVideo = p.kind === 'VIDEO';
   const [connected, setConnected] = useState(false);
   const endedRef = useRef(false);
+  // Mirror `connected` into a ref so the LiveKitRoom callbacks (stable closures)
+  // can read the latest connection state without re-subscribing.
+  const connectedRef = useRef(false);
+  useEffect(() => {
+    connectedRef.current = connected;
+  }, [connected]);
 
   useEffect(() => {
     // Reclaim audio focus (K5) — interrupts any expo-audio voice playback.
@@ -73,7 +79,10 @@ export default function CallScreen() {
         video={isVideo}
         onConnected={() => setConnected(true)}
         onDisconnected={() => leave(true)}
-        onError={() => leave(true)}>
+        // Only hang up on error once we've actually connected. A pre-connect
+        // error (e.g. a transient signal hiccup) shouldn't fire a hangup on a
+        // call that may not be ACCEPTED yet — just leave the screen.
+        onError={() => leave(connectedRef.current)}>
         <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
           <Stage isVideo={isVideo} peerName={p.peerName ?? ''} connected={connected} />
           <Controls isVideo={isVideo} onHangup={() => leave(true)} />

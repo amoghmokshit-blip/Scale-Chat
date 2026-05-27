@@ -2,13 +2,14 @@ import { Feather } from '@expo/vector-icons';
 import type { CallKind } from '@scalechat/shared';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useRef } from 'react';
-import { Image, Pressable, StyleSheet, View } from 'react-native';
+import { Alert, Image, Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { Brand, FontWeight, Spacing } from '@/constants/theme';
 import { ChatCopy } from '@/features/chat/copy';
 import { chatRepository } from '@/features/chat/data';
+import { ensureCallPermissions } from '@/lib/call-permissions';
 import { chatSocket } from '@/lib/chat-socket';
 
 /**
@@ -30,8 +31,14 @@ export default function IncomingCallScreen() {
   const router = useRouter();
   const isVideo = p.kind === 'VIDEO';
   const busy = useRef(false);
+  const dismissed = useRef(false);
 
   const dismiss = () => {
+    // Idempotent: the call:taken / call:ended listeners and the accept/decline
+    // paths can all reach here (e.g. the ring times out while the mic dialog is
+    // up) — navigating twice would pop an extra screen off the stack.
+    if (dismissed.current) return;
+    dismissed.current = true;
     if (router.canGoBack()) router.back();
     else router.replace('/(tabs)');
   };
@@ -54,6 +61,20 @@ export default function IncomingCallScreen() {
   async function accept() {
     if (busy.current) return;
     busy.current = true;
+    // Pre-grant mic (+ camera for video) BEFORE navigating to the CallScreen, so
+    // the OS dialog never interrupts the LiveKit connect. Deny → decline so the
+    // caller sees the "declined" pill immediately rather than the 30s MISSED wait.
+    const ok = await ensureCallPermissions(p.kind);
+    if (!ok) {
+      Alert.alert(ChatCopy.calls.permissionTitle, ChatCopy.calls.permissionBody);
+      try {
+        await chatRepository.declineCall?.(p.callId);
+      } catch {
+        // ignore — dismiss regardless
+      }
+      dismiss();
+      return;
+    }
     try {
       const res = await chatRepository.acceptCall?.(p.callId);
       if (!res) {

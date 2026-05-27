@@ -174,5 +174,8 @@ export const ChatCopy = {
     speaker: 'Speaker',
     flipCamera: 'Flip',
     callFailed: 'Couldn’t connect the call',
+    permissionTitle: 'Permission needed',
+    permissionBody:
+      'ScaleChat needs microphone (and camera for video) access to place calls. Enable it in Settings.',
   },
 } as const;
