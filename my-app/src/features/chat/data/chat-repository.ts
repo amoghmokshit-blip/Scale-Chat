@@ -7,6 +7,7 @@ import type {
   ClearChatResponse,
   CommonGroupsListResponse,
   DevicePlatform,
+  MessageSearchPage,
   MuteChatResponse,
   ReportReason,
   UserProfileCard,
@@ -187,6 +188,16 @@ export interface ChatRepository {
   listCallsInThread?(threadId: string): Promise<CallSummary[]>;
   /** Register this device's Expo push token for call wakeup. `POST /push/tokens`. */
   registerPushToken?(expoPushToken: string, platform: DevicePlatform): Promise<void>;
+  /**
+   * Search messages in a thread by keyword (P2-Search).
+   * `GET /chats/:chatId/messages/search?q=&cursor=&limit=`.
+   * Results are sorted by sequence DESC (newest first) and cursor-paginated.
+   */
+  searchMessages?(
+    chatId: string,
+    q: string,
+    opts?: { cursor?: string; limit?: number },
+  ): Promise<MessageSearchPage>;
   /** Subscribe to repository changes (any thread/message update). */
   subscribe(listener: () => void): () => void;
 }

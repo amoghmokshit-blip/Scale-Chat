@@ -380,7 +380,16 @@ export default function ContactProfileScreen() {
         <ProfileActionTile
           icon="search"
           label="Search"
-          onPress={() => setSheet('search')}
+          onPress={() => {
+            if (card.commonChatId) {
+              router.push({
+                pathname: '/chat/search',
+                params: { threadId: card.commonChatId },
+              });
+            } else {
+              setSheet('search');
+            }
+          }}
         />
       </View>
     </View>

@@ -5,6 +5,7 @@ import type {
   CallSummary,
   CallTokenResponse,
   DevicePlatform,
+  MessageSearchPage,
 } from '@scalechat/shared';
 
 import { ApiError } from '@/lib/api-client';
@@ -12,6 +13,7 @@ import { StorageKeys, getJson, setJson } from '@/lib/mmkv';
 
 import type { CreatePollInput, Message, PollMessage, Thread } from '../types';
 import type { ChatRepository } from './chat-repository';
+import { searchMessages as searchMessagesImpl } from './search-message-utils';
 import { SEED_CONTACT_BY_ID, SEED_MESSAGES, SEED_THREADS } from './seed';
 
 /**
@@ -688,6 +690,15 @@ export const mockChatRepository: ChatRepository = {
 
   async registerPushToken(_token, _platform: DevicePlatform) {
     // no-op in mock mode (no push service)
+  },
+
+  async searchMessages(chatId, q, opts): Promise<MessageSearchPage> {
+    await sleep();
+    const s = getState();
+    const all = s.messagesByThread[chatId] ?? [];
+    // Delegate pure search logic to the standalone helper so it's unit-testable
+    // without dragging in MMKV / native modules / @scalechat/shared value imports.
+    return searchMessagesImpl(all, q, opts) as MessageSearchPage;
   },
 
   subscribe(listener) {

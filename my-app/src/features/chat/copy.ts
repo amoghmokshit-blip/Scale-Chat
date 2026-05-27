@@ -193,6 +193,22 @@ export const ChatCopy = {
     clearChatCta: 'Clear chat',
   },
 
+  /** In-thread message search overlay (P2-Search). */
+  search: {
+    /** Modal title. */
+    title: 'Search in chat',
+    /** TextInput placeholder. */
+    placeholder: 'Search messages…',
+    /** Shown when the query is empty / too short. */
+    emptyPrompt: 'Type to search messages',
+    /** Shown when a valid query returns no hits. */
+    noResults: 'No messages found',
+    /** Sender label when the hit was sent by me. */
+    senderMe: 'You',
+    /** Generic error shown when the network call fails. */
+    error: 'Search failed. Please try again.',
+  },
+
   /** Voice/Video call UI (Tranche 2.I). */
   calls: {
     incomingVoice: 'Incoming voice call',

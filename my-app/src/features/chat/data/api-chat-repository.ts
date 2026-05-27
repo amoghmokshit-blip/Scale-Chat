@@ -18,6 +18,7 @@ import type {
   MessageDto,
   MessageListResponse,
   MessageReportAck,
+  MessageSearchPage,
   MuteChatBody,
   MuteChatResponse,
   PollAggregate,
@@ -1243,6 +1244,15 @@ export const apiChatRepository: ChatRepository = {
 
   async registerPushToken(expoPushToken, platform: DevicePlatform) {
     await apiClient.post<void>('/push/tokens', { expoPushToken, platform });
+  },
+
+  async searchMessages(chatId, q, opts) {
+    const params = new URLSearchParams({ q });
+    if (opts?.cursor) params.set('cursor', opts.cursor);
+    if (opts?.limit) params.set('limit', String(opts.limit));
+    return apiClient.get<MessageSearchPage>(
+      `/chats/${chatId}/messages/search?${params.toString()}`,
+    );
   },
 
   subscribe(listener) {

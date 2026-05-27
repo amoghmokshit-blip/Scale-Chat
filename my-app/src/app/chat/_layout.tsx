@@ -28,6 +28,13 @@ export default function ChatLayout() {
         name="compose-poll"
         options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
       />
+      {/* In-thread search (P2-Search) — same modal-sibling pattern so dismissing
+          returns to the thread with its scroll position intact. threadId is passed
+          as a param; tapping a hit navigates back to [id] with highlightSequence. */}
+      <Stack.Screen
+        name="search"
+        options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
+      />
       {/* Calls (Tranche 2.I) — full-screen, gesture-locked so a swipe can't
           dismiss a live call. IncomingCall slides up; CallScreen fades in. */}
       <Stack.Screen

@@ -2,7 +2,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   FlatList,
@@ -82,7 +82,10 @@ type ListItem =
  */
 export default function ChatThreadScreen() {
   const router = useRouter();
-  const { id } = useLocalSearchParams<{ id?: string }>();
+  const { id, highlightSequence } = useLocalSearchParams<{
+    id?: string;
+    highlightSequence?: string;
+  }>();
   const insets = useSafeAreaInsets();
   const {
     thread,
@@ -173,6 +176,21 @@ export default function ChatThreadScreen() {
       if (id) chatRepository.markThreadRead(id);
     }, [id])
   );
+
+  // P2-Search: when the thread is opened (or re-focused) with a `highlightSequence`
+  // param (set by chat/search.tsx on hit tap), scroll to that message if it is already
+  // in the loaded list. Out-of-window sequences (not yet loaded via loadOlder) are
+  // deliberately ignored in this tranche — deep back-pagination is deferred.
+  useEffect(() => {
+    if (!highlightSequence) return;
+    const seq = Number(highlightSequence);
+    if (Number.isNaN(seq)) return;
+    const index = items.findIndex(
+      (item) => item.kind === 'message' && item.message.sequence === seq,
+    );
+    if (index < 0) return; // message not in loaded window — do nothing this tranche
+    listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
+  }, [highlightSequence, items]);
 
   const renderItem: ListRenderItem<ListItem> = ({ item }) => {
     if (item.kind === 'divider') return <DayDivider label={item.label} />;
@@ -541,6 +559,12 @@ export default function ChatThreadScreen() {
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+          onScrollToIndexFailed={() => {
+            // Safe fallback: scroll to the top so the list doesn't lock up.
+            // This fires when `highlightSequence` is beyond the loaded window
+            // (out-of-window deep-link deferred to a future tranche).
+            listRef.current?.scrollToOffset({ offset: 0, animated: false });
+          }}
           onScroll={(e) => {
             if (e.nativeEvent.contentOffset.y < 80 && hasMoreOlder && !loadingOlder) {
               void loadOlder();
