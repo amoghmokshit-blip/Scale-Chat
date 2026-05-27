@@ -14,6 +14,21 @@
 
 **Full-suite verification (2026-05-27):** backend `npm run api:test:e2e` → **68 passed** / 6 pre-existing todo (7 suites); mobile `npm test` → **160 passed** / 2 skipped (14 suites). 2 dev-DB migrations applied + `prisma migrate status` in sync. Each slice landed via implementer → spec review → quality review → fix round.
 
+### Ultrareview fixes (2026-05-27, after PR #5 opened)
+
+A cloud multi-agent review (`/ultrareview`) found 6 valid issues the per-slice reviews missed (notably two RN-render bugs the pure-logic Jest harness can't catch). All fixed + pushed:
+
+| Bug | Fix |
+|---|---|
+| **bug_003** (Android crash) | `SearchHitRow` nested `<View>` in `<Text>` → changed outer to `Pressable`. **Emulator-verified**: search results render on Android, no crash. |
+| **bug_002** (theme not live on API) | `apiChatRepository.setChatTheme` now calls `notify()` (every other mutator did) so the thread re-derives the theme without a manual refresh. |
+| **bug_009** (search re-scroll) | scroll-to-hit effect re-fired on every message-list change; added a `handledHighlightRef` so it scrolls exactly once per highlight request. |
+| **bug_016** (search over-match) | `searchMessages` now escapes LIKE metachars (`\`,`%`,`_`) before `contains` (`buildSnippet` keeps the raw `q`); +1 e2e case (`user_name` ≠ `userXname`). |
+| **bug_001** (media fallback) | Media row no-chat fallback opened the "Search coming soon" sheet → added a `'media'` `SheetKind` + copy. |
+| **bug_004** (nit: picker seed) | profile theme picker checkmark now seeded from `getThread(commonChatId).chatTheme`. |
+
+Post-fix full suites: backend **69 e2e**, mobile **160 Jest** green.
+
 ### Known minor debt
 - Mobile test harness gained a `react-native` → minimal stub + CSS stub in `jest.config.js` so pure-logic tests can import `theme.ts` (which imports `@/global.css` + `Platform`). Consistent with the project's no-RN-render test philosophy; a future component-rendering test would need the `jest-expo` preset instead.
 - "Free up space" (Storage) is a confirm + stub — real per-chat device-cache eviction is deferred (SDK 56 has no per-chat cache-clear API; server media is shared/ref-counted).
