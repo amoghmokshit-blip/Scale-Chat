@@ -6,13 +6,12 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   FlatList,
-  KeyboardAvoidingView,
-  Platform,
   StatusBar,
   StyleSheet,
   View,
   type ListRenderItem,
 } from 'react-native';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
@@ -49,6 +48,14 @@ import { formatDayLabel } from '@/lib/format-time';
 import { truncateFileName, validateMediaPick } from '@/lib/media-pick';
 
 import type { Message } from '@/features/chat/types';
+
+/**
+ * Height of `ChatHeader` BELOW the top safe-area inset — the header lives above
+ * the KeyboardAvoidingView, so its full height (inset + this) is the offset the
+ * keyboard avoidance must subtract. Derived from chat-header.tsx styles:
+ * row paddingTop (4) + 52px avatar + row paddingBottom (8) + bg paddingBottom (16).
+ */
+const CHAT_HEADER_HEIGHT = 80;
 
 type ListItem =
   | { kind: 'divider'; id: string; label: string }
@@ -524,8 +531,8 @@ export default function ChatThreadScreen() {
       />
       <KeyboardAvoidingView
         style={styles.body}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={insets.top}>
+        behavior="padding"
+        keyboardVerticalOffset={insets.top + CHAT_HEADER_HEIGHT}>
         <FlatList
           ref={listRef}
           data={items}

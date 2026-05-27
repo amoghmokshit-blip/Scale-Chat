@@ -269,3 +269,34 @@ npm --workspace=apps/api run test:e2e -- --testPathPattern="contacts"
 ```
 
 If you re-run `npm run db:setup` it'll start fresh containers on 5433/6380; then no env overrides needed.
+
+---
+
+## WhatsApp-style auto-import refit (2026-05-27)
+
+The original PR-6 flow made device-contact import a deliberate, multi-step,
+user-controlled action: open `/add-contact` → tap "Pick from phonebook" →
+`/import-contacts` → tick checkboxes → tap "Save N selected" → dismiss a blocking
+`Alert`. Per founder feedback ("make it like WhatsApp; there are unnecessary
+steps"), this was refit to a one-tap auto-sync:
+
+- **Primary entry** — the chat-list "+" menu "Add Contact" item now routes directly
+  to `/import-contacts` (was `/add-contact`). `new-chat-menu.tsx`.
+- **Auto-import** — `import-contacts.tsx` no longer has checkboxes, a "Select all"
+  toggle, a sticky "Save" bar, or a success `Alert`. When discovery resolves to a
+  non-empty match set, a `useEffect` calls `contactsRepository.addMany()` **once**
+  (guarded by a `didImport` ref; reset on manual refresh). `addMany` is idempotent
+  (`alreadyHad`) so a cache-hydrated re-entry is harmless.
+- **Read-only list + inline status** — `MatchRow` dropped its checkbox; the header
+  shows a small `ImportStatus` pill (spinner "Adding…" → "Added N" ✓ → "Couldn't
+  add · Retry") where the "Select all" toggle used to be.
+- **Manual add stays reachable** — a secondary "Add a number manually" link
+  (→ `/add-contact`) was added to the idle, denied, and empty-matches states, since
+  the phonebook screen is now the primary path.
+- **Permission copy** — `app.json` `expo-contacts.contactsPermission` no longer says
+  "nothing is saved until you tap Save" (now: "only matches are added to your
+  contacts"). Picked up by the next prebuild.
+
+The `useDeviceContacts` hook is unchanged — it stays a pure discovery pipeline; the
+auto-save lives in the screen. No backend changes (`/contacts/discover` +
+`/contacts/bulk` already support this).

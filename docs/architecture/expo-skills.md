@@ -1,7 +1,4 @@
-# Expo Skills & Stack Map — ScaleChat
-
-> The concrete modules, libraries, and EAS workflow the team will exercise to build ScaleChat on Expo SDK 56.
-> Read this alongside `my-app/CLAUDE.md`.
+is> The concrete modules, libraries, and EAS workflow the team will exercise to build ScaleChat on Expo SDK 56.
 
 **Hard rule** (repeated from CLAUDE.md): for **every** module below, read the v56 docs at https://docs.expo.dev/versions/v56.0.0/ before first use. Expo APIs shift across versions and the AGENTS.md file enforces this.
 
