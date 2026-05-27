@@ -293,6 +293,9 @@ model Message {
   /// DOCUMENT.
   documentTitle     String?      @db.VarChar(255)
   documentSizeBytes BigInt?
+  /// Unified media size (IMAGE/VOICE/VIDEO/DOCUMENT) populated on send.
+  /// NULL for pre-existing rows and TEXT/SYSTEM/LOCATION/CONTACT_CARD kinds.
+  mediaSizeBytes    BigInt?
   /// Forward (Tranche 2.E builds the endpoint; column lands here as the schema foundation).
   forwardedFromMessageId String? @db.Uuid
   forwardCount      Int          @default(0)
