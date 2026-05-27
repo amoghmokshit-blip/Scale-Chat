@@ -1,4 +1,5 @@
 export * from './auth.js';
+export * from './chat-storage.js';
 export * from './calls.js';
 export * from './chat-filters.js';
 export * from './chats.js';

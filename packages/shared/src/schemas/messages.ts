@@ -175,6 +175,8 @@ export const SendMessageSchema = z
     /** DOCUMENT only. */
     documentTitle: z.string().trim().min(1).max(255).optional(),
     documentSizeBytes: z.number().int().positive().max(104_857_600).optional(),
+    /** Unified media size in bytes — IMAGE/VOICE/VIDEO/DOCUMENT (populated on send). */
+    mediaSizeBytes: z.number().int().positive().max(104_857_600).optional(),
     replyToMessageId: z.string().uuid().optional(),
   })
   .superRefine((v, ctx) => {
