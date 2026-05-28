@@ -16,13 +16,17 @@ import {
   MessageDeleteScopeSchema,
   MessageListQuerySchema,
   MessageSchema,
+  MessageSearchQuerySchema,
   SendMessageSchema,
   type ChatDetailDto,
   type ChatMediaListQuery,
+  type ChatStorageSummary,
   type MessageDeleteScope,
   type MessageDto,
   type MessageListQuery,
   type MessageListResponse,
+  type MessageSearchPage,
+  type MessageSearchQuery,
   type SendMessageBody,
 } from '@scalechat/shared';
 import { z } from 'zod';
@@ -54,6 +58,25 @@ export class MessagesController {
     return this.messages.getChat(user.sub, chatId);
   }
 
+  /**
+   * `GET /chats/:chatId/messages/search?q=&cursor=&limit=`
+   * Case-insensitive substring search over message text in a chat.
+   * Excludes tombstones and messages before the caller's clearedAt.
+   * Results ordered sequence DESC; cursor-paginated.
+   *
+   * IMPORTANT: this handler MUST remain declared before `@Get('messages')` so
+   * NestJS/Fastify resolves `messages/search` as this route rather than
+   * treating "search" as a `:messageId`-style dynamic segment on the list route.
+   */
+  @Get('messages/search')
+  searchMessages(
+    @CurrentUser() user: AccessTokenPayload,
+    @Param('chatId', new ParseUUIDPipe({ version: '4' })) chatId: string,
+    @Query(new ZodValidationPipe(MessageSearchQuerySchema)) query: MessageSearchQuery,
+  ): Promise<MessageSearchPage> {
+    return this.messages.searchMessages(user.sub, chatId, query.q, query.cursor, query.limit);
+  }
+
   @Get('messages')
   list(
     @CurrentUser() user: AccessTokenPayload,
@@ -75,6 +98,19 @@ export class MessagesController {
     @Query(new ZodValidationPipe(ChatMediaListQuerySchema)) query: ChatMediaListQuery,
   ): Promise<MessageListResponse> {
     return this.messages.listMedia(user.sub, chatId, query);
+  }
+
+  /**
+   * `GET /chats/:chatId/storage`
+   * Per-chat storage summary — total bytes + per-kind breakdown.
+   * Member-gated; returns 403 `not_a_member` for non-members.
+   */
+  @Get('storage')
+  getChatStorage(
+    @CurrentUser() user: AccessTokenPayload,
+    @Param('chatId', new ParseUUIDPipe({ version: '4' })) chatId: string,
+  ): Promise<ChatStorageSummary> {
+    return this.messages.getChatStorage(user.sub, chatId);
   }
 
   @Post('messages')

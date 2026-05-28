@@ -4,10 +4,13 @@ import { SERVER_ONLY_KINDS } from '@scalechat/shared';
 import type {
   ChatDetailDto,
   ChatMediaListQuery,
+  ChatStorageSummary,
   MediaUploadKind,
   MessageDeleteScope,
   MessageDto,
   MessageListResponse,
+  MessageSearchHit,
+  MessageSearchPage,
   SendMessageBody,
 } from '@scalechat/shared';
 
@@ -31,6 +34,59 @@ function isMessageCursor(raw: unknown): raw is MessageCursor {
   if (!raw || typeof raw !== 'object') return false;
   const r = raw as Record<string, unknown>;
   return typeof r.createdAt === 'string' && typeof r.id === 'string';
+}
+
+// ─── Search cursor ────────────────────────────────────────────────────────────
+
+type SearchCursor = { sequence: string };
+
+function isSearchCursor(raw: unknown): raw is SearchCursor {
+  if (!raw || typeof raw !== 'object') return false;
+  const r = raw as Record<string, unknown>;
+  return typeof r.sequence === 'string' && /^\d+$/.test(r.sequence);
+}
+
+/**
+ * Build a short snippet centred on the first case-insensitive occurrence of
+ * `q` in `text`. Returns at most ~20 chars before and after the match, with
+ * ellipsis trimming at the boundaries.
+ *
+ * Called only for rows where `text` is non-null (tombstones are excluded by
+ * the `deletedAt: null` filter before this is reached).
+ */
+function buildSnippet(text: string, q: string): string {
+  const WINDOW = 20;
+  // Work in codepoint space (Array.from splits on full Unicode scalars, not
+  // UTF-16 code units) so we never split a surrogate pair mid-slice. This
+  // matters for Hindi text and emoji, both common on the India market.
+  const chars = Array.from(text);
+  const qChars = Array.from(q);
+
+  // Find the match position in codepoint space by scanning the lowercase
+  // codepoint arrays. This mirrors the case-insensitive DB match.
+  const lowerChars = chars.map((c) => c.toLowerCase());
+  const lowerQ = qChars.map((c) => c.toLowerCase());
+  let idx = -1;
+  outer: for (let i = 0; i <= chars.length - qChars.length; i++) {
+    for (let j = 0; j < lowerQ.length; j++) {
+      if (lowerChars[i + j] !== lowerQ[j]) continue outer;
+    }
+    idx = i;
+    break;
+  }
+
+  if (idx === -1) {
+    // Shouldn't happen (Postgres already matched this row), but fall back to
+    // the start of the text.
+    const cap = WINDOW * 2 + qChars.length;
+    return chars.length > cap ? `${chars.slice(0, cap).join('')}…` : text;
+  }
+
+  const start = Math.max(0, idx - WINDOW);
+  const end = Math.min(chars.length, idx + qChars.length + WINDOW);
+  const prefix = start > 0 ? '…' : '';
+  const suffix = end < chars.length ? '…' : '';
+  return `${prefix}${chars.slice(start, end).join('')}${suffix}`;
 }
 
 type MessageRow = {
@@ -57,6 +113,7 @@ type MessageRow = {
   contactPhoneE164: string | null;
   documentTitle: string | null;
   documentSizeBytes: bigint | null;
+  mediaSizeBytes: bigint | null;
   forwardedFromMessageId: string | null;
   forwardCount: number;
   pinnedAt: Date | null;
@@ -216,6 +273,7 @@ export class MessagesService {
       lastReadSequence: member.lastReadSequence.toString(),
       counterpartLastReadSequence:
         counterpartMember?.lastReadSequence.toString() ?? null,
+      chatTheme: (member.chatTheme as ChatDetailDto['chatTheme']) ?? null,
     };
   }
 
@@ -317,6 +375,87 @@ export class MessagesService {
     return {
       items: sortedAsc.map(this.rowToDto),
       meta: trimmedPage.meta,
+    };
+  }
+
+  /**
+   * Full-text search over message text within a single chat.
+   *
+   * Results are ordered by sequence DESC (newest first) so the client can
+   * display the most recent matches at the top, and cursor-paginated using the
+   * sequence number as the keyset key.
+   *
+   * Filtering:
+   *   - `deletedAt: null`  — tombstones never surface.
+   *   - `clearedAt` guard  — mirrors the `list` path: messages created at or
+   *     before the caller's personal clear timestamp are hidden.
+   *   - `text: { contains: q, mode: 'insensitive' }` — case-insensitive
+   *     substring search. We deliberately do NOT add `kind: 'TEXT'` — the
+   *     `text` filter on a nullable column already excludes non-text rows
+   *     (null does not contain any string), and this keeps future
+   *     caption-bearing kinds (e.g. image captions) searchable without a
+   *     schema change.
+   *
+   * // pg_trgm GIN index is the scale follow-up (CREATE INDEX ON messages
+   * // USING gin(text gin_trgm_ops) WHERE deleted_at IS NULL).
+   */
+  async searchMessages(
+    userId: string,
+    chatId: string,
+    q: string,
+    cursor: string | undefined,
+    limit: number,
+  ): Promise<MessageSearchPage> {
+    const member = await this.loadMemberOrThrow(userId, chatId);
+
+    const clearedFilter = member.clearedAt
+      ? { createdAt: { gt: member.clearedAt } }
+      : {};
+
+    const c = decodeCursor(cursor, isSearchCursor);
+
+    // Escape LIKE metachars so '_' and '%' match literally (Prisma `contains` does not).
+    // Backslash first so the inserted escapes aren't themselves re-escaped. Prisma's
+    // ILIKE uses '\' as the escape char by default.
+    const escaped = q.replace(/[\\%_]/g, (c) => `\\${c}`);
+
+    const rows = await this.prisma.message.findMany({
+      where: {
+        chatId,
+        deletedAt: null,
+        text: { contains: escaped, mode: 'insensitive' },
+        ...clearedFilter,
+        ...(c ? { sequence: { lt: BigInt(c.sequence) } } : {}),
+      },
+      orderBy: { sequence: 'desc' },
+      take: limit + 1,
+      select: {
+        id: true,
+        sequence: true,
+        text: true,
+        createdAt: true,
+        senderUserId: true,
+      },
+    });
+
+    const hasMore = rows.length > limit;
+    const pageRows = hasMore ? rows.slice(0, limit) : rows;
+
+    const items: MessageSearchHit[] = pageRows.map((r) => ({
+      messageId: r.id,
+      sequence: r.sequence.toString(),
+      snippet: buildSnippet(r.text!, q),
+      createdAt: r.createdAt.toISOString(),
+      senderUserId: r.senderUserId,
+    }));
+
+    const nextCursor = hasMore
+      ? encodeCursor<SearchCursor>({ sequence: pageRows[pageRows.length - 1]!.sequence.toString() })
+      : null;
+
+    return {
+      items,
+      meta: { nextCursor, hasMore },
     };
   }
 
@@ -471,6 +610,11 @@ export class MessagesService {
           body.kind === 'DOCUMENT' && body.documentSizeBytes !== undefined
             ? BigInt(body.documentSizeBytes)
             : null,
+        // Unified media size — populated for all MEDIA_BACKED_KINDS on send.
+        mediaSizeBytes:
+          MEDIA_BACKED_KINDS.has(body.kind) && body.mediaSizeBytes !== undefined
+            ? BigInt(body.mediaSizeBytes)
+            : null,
         replyToMessageId: body.replyToMessageId ?? null,
       });
       return rowToDto(created);
@@ -533,6 +677,7 @@ export class MessagesService {
         contactPhoneE164: source.contactPhoneE164,
         documentTitle: source.documentTitle,
         documentSizeBytes: source.documentSizeBytes,
+        mediaSizeBytes: source.mediaSizeBytes,
         forwardedFromMessageId: source.id,
         replyToMessageId: null,
       });
@@ -562,6 +707,52 @@ export class MessagesService {
         d.poll = aggregates.get(d.id) ?? null;
       }
     }
+  }
+
+  /**
+   * Per-chat storage summary — `GET /chats/:chatId/storage`.
+   *
+   * Member-gated: 403 `not_a_member` if the caller isn't an active member.
+   *
+   * Aggregates non-tombstoned message rows using the unified `mediaSizeBytes`
+   * column (populated from Tranche P2-Storage onward) with a COALESCE fallback
+   * to `documentSizeBytes` for pre-existing DOCUMENT rows. TEXT / SYSTEM /
+   * LOCATION / CONTACT_CARD rows contribute 0 bytes but are counted in
+   * `perKind` so the caller can show "N text messages".
+   *
+   * BigInt sums are returned as decimal strings so they survive the JSON
+   * boundary without precision loss.
+   */
+  async getChatStorage(userId: string, chatId: string): Promise<ChatStorageSummary> {
+    await this.assertMember(userId, chatId);
+
+    type RawRow = { kind: string; count: bigint; totalBytes: bigint };
+    const rows = await this.prisma.$queryRaw<RawRow[]>`
+      SELECT
+        kind,
+        COUNT(*)::bigint                                             AS count,
+        SUM(COALESCE("mediaSizeBytes", "documentSizeBytes", 0))::bigint AS "totalBytes"
+      FROM messages
+      WHERE "chatId" = ${chatId}::uuid
+        AND "deletedAt" IS NULL
+      GROUP BY kind
+      ORDER BY "totalBytes" DESC
+    `;
+
+    let grandTotal = 0n;
+    const perKind = rows.map((r) => {
+      grandTotal += r.totalBytes;
+      return {
+        kind: r.kind as import('@scalechat/shared').MessageKind,
+        count: Number(r.count),
+        totalBytes: r.totalBytes.toString(),
+      };
+    });
+
+    return {
+      perKind,
+      totalBytes: grandTotal.toString(),
+    };
   }
 
   /**

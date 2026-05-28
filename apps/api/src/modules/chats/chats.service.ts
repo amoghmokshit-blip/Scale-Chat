@@ -7,6 +7,7 @@ import {
 import { ChatKind, MessageKind, Prisma } from '@prisma/client';
 import {
   ChatFilterCriteriaSchema,
+  ChatThemeEnum,
   brandAsMasked,
   type ChatFilter,
   type ChatFilterCriteria,
@@ -21,6 +22,8 @@ import {
   type MarkReadBody,
   type MuteChatBody,
   type MuteChatResponse,
+  type SetChatThemeBody,
+  type SetChatThemeResponse,
 } from '@scalechat/shared';
 
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -575,5 +578,36 @@ export class ChatsService {
     if (result.count === 0) {
       throw new NotFoundException({ code: 'filter_not_found', message: 'Filter not found.' });
     }
+  }
+
+  /**
+   * Set (or clear) the per-user per-chat theme override.
+   *
+   * Mirrors the setMute/clearChat pattern: findUnique → 404 if missing → update.
+   * A defence-in-depth parse of non-null theme values guards against any future
+   * gap between the controller's ZodValidationPipe and this layer.
+   */
+  async setTheme(
+    userId: string,
+    chatId: string,
+    body: SetChatThemeBody,
+  ): Promise<SetChatThemeResponse> {
+    const member = await this.prisma.chatMember.findUnique({
+      where: { chatId_userId: { chatId, userId } },
+    });
+    if (!member) {
+      throw new NotFoundException({ code: 'chat_not_found', message: 'Chat not found.' });
+    }
+    if (body.theme !== null) {
+      const parsed = ChatThemeEnum.safeParse(body.theme);
+      if (!parsed.success) {
+        throw new BadRequestException({ code: 'unknown_theme', message: `Unknown theme: ${body.theme}` });
+      }
+    }
+    await this.prisma.chatMember.update({
+      where: { id: member.id },
+      data: { chatTheme: body.theme },
+    });
+    return { theme: body.theme };
   }
 }

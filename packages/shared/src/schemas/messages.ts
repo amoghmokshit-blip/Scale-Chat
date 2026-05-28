@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { ChatThemeEnum } from './chat-theme.js';
 import { paginatedResponse } from './common.js';
 import { PollAggregateSchema } from './polls.js';
 import { ReactionAggregateSchema } from './reactions.js';
@@ -175,6 +176,8 @@ export const SendMessageSchema = z
     /** DOCUMENT only. */
     documentTitle: z.string().trim().min(1).max(255).optional(),
     documentSizeBytes: z.number().int().positive().max(104_857_600).optional(),
+    /** Unified media size in bytes — IMAGE/VOICE/VIDEO/DOCUMENT (populated on send). */
+    mediaSizeBytes: z.number().int().positive().max(104_857_600).optional(),
     replyToMessageId: z.string().uuid().optional(),
   })
   .superRefine((v, ctx) => {
@@ -452,5 +455,10 @@ export const ChatDetailSchema = z.object({
    * Known Limitations #1.
    */
   counterpartLastReadSequence: z.string().regex(/^\d+$/).nullable(),
+  /**
+   * Per-user per-chat theme override (P2-Theme). Null = default theme.
+   * Values: 'default' | 'midnight' | 'forest' | 'sunset'.
+   */
+  chatTheme: ChatThemeEnum.nullable().default(null),
 });
 export type ChatDetailDto = z.infer<typeof ChatDetailSchema>;

@@ -21,6 +21,7 @@ import {
   CreateSuperGroupSchema,
   MarkReadSchema,
   MuteChatSchema,
+  SetChatThemeSchema,
   type ChatBooleanSetterBody,
   type ChatFilterRow,
   type ChatFiltersListResponse,
@@ -34,6 +35,8 @@ import {
   type MarkReadBody,
   type MuteChatBody,
   type MuteChatResponse,
+  type SetChatThemeBody,
+  type SetChatThemeResponse,
 } from '@scalechat/shared';
 
 import { CurrentUser } from '../../common/auth/current-user.decorator';
@@ -160,6 +163,15 @@ export class ChatsController {
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
   ): Promise<ClearChatResponse> {
     return this.chats.clearChat(user.sub, id);
+  }
+
+  @Patch(':id/theme')
+  setTheme(
+    @CurrentUser() user: AccessTokenPayload,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body(new ZodValidationPipe(SetChatThemeSchema)) body: SetChatThemeBody,
+  ): Promise<SetChatThemeResponse> {
+    return this.chats.setTheme(user.sub, id, body);
   }
 
   /**

@@ -4,9 +4,11 @@ import type {
   CallKind,
   CallSummary,
   CallTokenResponse,
+  ChatStorageSummary,
   ClearChatResponse,
   CommonGroupsListResponse,
   DevicePlatform,
+  MessageSearchPage,
   MuteChatResponse,
   ReportReason,
   UserProfileCard,
@@ -187,6 +189,29 @@ export interface ChatRepository {
   listCallsInThread?(threadId: string): Promise<CallSummary[]>;
   /** Register this device's Expo push token for call wakeup. `POST /push/tokens`. */
   registerPushToken?(expoPushToken: string, platform: DevicePlatform): Promise<void>;
+  /**
+   * Search messages in a thread by keyword (P2-Search).
+   * `GET /chats/:chatId/messages/search?q=&cursor=&limit=`.
+   * Results are sorted by sequence DESC (newest first) and cursor-paginated.
+   */
+  searchMessages?(
+    chatId: string,
+    q: string,
+    opts?: { cursor?: string; limit?: number },
+  ): Promise<MessageSearchPage>;
+  /**
+   * Summarise media storage for a chat (P2-Storage).
+   * `GET /chats/:chatId/storage` → `ChatStorageSummary` with `perKind` rows
+   * (heaviest kind first) + grand-total `totalBytes` (BigInt-as-string).
+   */
+  getChatStorage?(chatId: string): Promise<ChatStorageSummary>;
+  /**
+   * Set (or reset) the per-user per-chat theme (P2-Theme).
+   * `PATCH /chats/:chatId/theme { theme: ChatTheme | null }`.
+   * `null` resets to the default. 400 `unknown_theme` if the value isn't in
+   * `CHAT_THEMES`; 404 if the user is not a member.
+   */
+  setChatTheme?(threadId: string, theme: string | null): Promise<void>;
   /** Subscribe to repository changes (any thread/message update). */
   subscribe(listener: () => void): () => void;
 }

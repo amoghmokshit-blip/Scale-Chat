@@ -170,6 +170,147 @@ export const ChatCopy = {
     },
   },
 
+  /**
+   * Contact Profile v2 (Figma 1:3877) — coming-soon sheet titles/bodies
+   * for affordances not yet wired, plus the clear-chat confirm dialog.
+   */
+  profile: {
+    /** Per-chat search — sheet title + body. */
+    searchTitle: 'Search coming soon',
+    searchBody: 'Search through messages in this chat. We\'re putting the finishing touches on it.',
+    /** Chat theme / wallpaper — sheet title + body. */
+    chatThemeTitle: 'Chat themes coming soon',
+    chatThemeBody: 'Pick a custom wallpaper or colour theme just for this conversation.',
+    /** Manage storage — sheet title + body. */
+    manageStorageTitle: 'Storage manager coming soon',
+    manageStorageBody: 'Review and delete media to free up space on your device.',
+    /** Privacy settings — sheet title + body. */
+    privacyTitle: 'Privacy settings coming soon',
+    privacyBody: 'Control what this contact can see — profile photo, last seen, status updates.',
+    /** Clear chat confirm — title, body, and CTA. */
+    clearChatConfirmTitle: 'Clear this chat?',
+    clearChatConfirmBody: 'All messages will be removed from your device. Your contact will still have their copy.',
+    clearChatCta: 'Clear chat',
+    /** Media, Links & Docs — sheet title + body (shown when no commonChatId). */
+    mediaTitle: 'No shared media yet',
+    mediaBody: 'Start a chat to share photos, voice notes, and documents — they\'ll show up here.',
+  },
+
+  /** In-thread message search overlay (P2-Search). */
+  search: {
+    /** Modal title. */
+    title: 'Search in chat',
+    /** TextInput placeholder. */
+    placeholder: 'Search messages…',
+    /** Shown when the query is empty / too short. */
+    emptyPrompt: 'Type to search messages',
+    /** Shown when a valid query returns no hits. */
+    noResults: 'No messages found',
+    /** Sender label when the hit was sent by me. */
+    senderMe: 'You',
+    /** Generic error shown when the network call fails. */
+    error: 'Search failed. Please try again.',
+  },
+
+  /** Manage Storage screen (P2-Storage). */
+  storage: {
+    /** Screen header title. */
+    title: 'Manage Storage',
+    /** Sub-label under the total bytes figure. */
+    totalLabel: 'Total storage used',
+    /** Disclaimer under the total card. */
+    disclaimer: 'Sizes shown for media sent after the last app update.',
+    /** Human-readable label for each MessageKind row. */
+    kindLabel: {
+      TEXT: 'Text messages',
+      IMAGE: 'Photos',
+      VOICE: 'Voice notes',
+      VIDEO: 'Videos',
+      DOCUMENT: 'Documents',
+      LOCATION: 'Locations',
+      LOCATION_LIVE: 'Live locations',
+      CONTACT_CARD: 'Contacts',
+      POLL: 'Polls',
+      CALL_EVENT: 'Call events',
+      SYSTEM: 'System',
+    } as Record<string, string>,
+    /** "N items" / "1 item" count sub-label. */
+    itemCount: (n: number) => `${n} ${n === 1 ? 'item' : 'items'}`,
+    /** Empty-state body (no messages yet). */
+    empty: 'No messages in this chat yet.',
+    /** Generic network / fetch error. */
+    error: 'Could not load storage info.',
+    /** Shown when the screen is opened without a chatId param. */
+    noChatId: 'No chat id provided.',
+    /** "Free up space" button label (also used as accessibilityLabel). */
+    freeUpSpace: 'Free up space',
+    /** Alert shown when the user taps "Free up space". */
+    freeUpAlert: {
+      title: 'Free up space',
+      body: 'This will clear locally cached media for this chat. The files will still be available to download again.',
+      clearCache: 'Clear cache',
+      cancel: 'Cancel',
+    },
+    /** Alert shown after the stub clear completes. */
+    doneAlert: {
+      title: 'Done',
+      body: 'Local cache cleared for this chat.',
+    },
+  },
+
+  /** Per-chat theme picker (P2-Theme). */
+  theme: {
+    /** Modal title shown in the picker sheet. */
+    pickerTitle: 'Chat theme',
+    /** Display names for each theme value (KEEP IN SYNC WITH ChatThemeEnum). */
+    nameDefault: 'Default',
+    nameMidnight: 'Midnight',
+    nameForest: 'Forest',
+    nameSunset: 'Sunset',
+    /** Alert shown when the server rejects the theme change. */
+    applyFailed: 'Could not apply theme. Please try again.',
+  },
+
+  /** Privacy sub-screen (P2-Privacy). */
+  privacy: {
+    /** Screen header title. */
+    screenTitle: 'Privacy',
+    /** Encryption row label. */
+    encryptionLabel: 'Encryption',
+    /** Encryption row hint shown below the label. */
+    encryptionHint: 'Messages secured in transit',
+    /** ComingSoonSheet title for the encryption info modal. */
+    encryptionTitle: 'End-to-end encryption',
+    /** ComingSoonSheet body for the encryption info modal. */
+    encryptionBody:
+      'All messages between you and this contact are encrypted in transit using TLS. No one outside this conversation can read them.',
+    /** Disappearing messages row label. */
+    disappearingLabel: 'Disappearing messages',
+    /** Disappearing messages hint (coming-soon placeholder). */
+    disappearingHint: 'Coming soon',
+    /** Block row label (contact is not blocked). */
+    blockLabel: 'Block',
+    /** Unblock row label (contact is already blocked). */
+    unblockLabel: 'Unblock',
+    /** Hint shown under block label when not blocked. */
+    blockHint: "Block this contact",
+    /** Hint shown under unblock label when blocked. */
+    blockedHint: 'You have blocked this contact',
+    /** Alert title for blocking — includes the contact name. */
+    blockAlertTitle: (name: string) => `Block ${name}?`,
+    /** Alert title for unblocking — includes the contact name. */
+    unblockAlertTitle: (name: string) => `Unblock ${name}?`,
+    /** Alert body for blocking. */
+    blockAlertBody:
+      "They won't be able to message you, and you won't be able to message them, until you unblock.",
+    /** Alert body for unblocking. */
+    unblockAlertBody: 'You will both be able to message each other again.',
+    /** Error shown when block fails. */
+    blockFailed: 'Could not block. Please try again.',
+    /** Error shown when unblock fails. */
+    unblockFailed: 'Could not unblock. Please try again.',
+  },
+
   /** Voice/Video call UI (Tranche 2.I). */
   calls: {
     incomingVoice: 'Incoming voice call',

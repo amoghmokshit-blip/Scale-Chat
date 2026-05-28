@@ -7,6 +7,7 @@ import type {
   CallTokenResponse,
   ChatDetailDto,
   ChatListResponse,
+  ChatStorageSummary,
   ClearChatResponse,
   CommonGroupsListResponse,
   CreateMessageReportBody,
@@ -18,6 +19,7 @@ import type {
   MessageDto,
   MessageListResponse,
   MessageReportAck,
+  MessageSearchPage,
   MuteChatBody,
   MuteChatResponse,
   PollAggregate,
@@ -279,6 +281,7 @@ function detailToThread(detail: ChatDetailDto, last?: MessageDto): Thread {
     lastMessage: last ? dtoToMessage(last, counterpart.id) : fallbackMessage,
     unreadCount: 0,
     lastReadSequence: Number(detail.lastReadSequence),
+    chatTheme: detail.chatTheme ?? null,
   };
 }
 
@@ -735,6 +738,8 @@ export const apiChatRepository: ChatRepository = {
     //    (their server validators reject a 0 size / non-allowlisted MIME), so
     //    they NEVER use the `fileSize(uri)` 0-stat fallback that IMAGE/VOICE do.
     let mediaObjectKey: string | undefined;
+    // Hoisted so body-building in step 3 can include mediaSizeBytes (P2-Storage).
+    let uploadedSizeBytes: number | undefined;
     if (isMedia) {
       try {
         const contentType =
@@ -761,6 +766,7 @@ export const apiChatRepository: ChatRepository = {
         const upload = await requestUploadUrl({ kind, contentType, sizeBytes });
         await putBytes(upload.uploadUrl, input.uri, contentType);
         mediaObjectKey = upload.objectKey;
+        uploadedSizeBytes = sizeBytes;
 
         // Flip uploading → sending so the bubble loses the spinner before the
         // server ack arrives — feels snappier and matches WhatsApp behaviour.
@@ -795,6 +801,9 @@ export const apiChatRepository: ChatRepository = {
         durationSec: input.durationSec,
         waveform: input.waveform,
         replyToMessageId: input.replyToMessageId,
+        // Populated once the R2 upload resolves (step 2). Lets the backend
+        // record mediaSizeBytes for storage accounting (P2-Storage).
+        ...(uploadedSizeBytes !== undefined ? { mediaSizeBytes: uploadedSizeBytes } : {}),
       };
     } else if (input.type === 'image') {
       body = {
@@ -804,6 +813,7 @@ export const apiChatRepository: ChatRepository = {
         imageWidth: input.width,
         imageHeight: input.height,
         replyToMessageId: input.replyToMessageId,
+        ...(uploadedSizeBytes !== undefined ? { mediaSizeBytes: uploadedSizeBytes } : {}),
       };
     } else if (input.type === 'document') {
       body = {
@@ -814,6 +824,11 @@ export const apiChatRepository: ChatRepository = {
         documentTitle: input.fileName,
         documentSizeBytes: input.sizeBytes,
         replyToMessageId: input.replyToMessageId,
+        // documentSizeBytes and mediaSizeBytes carry the same value for DOCUMENTs;
+        // both are sent so older backend versions still see documentSizeBytes.
+        // uploadedSizeBytes === input.sizeBytes here (step 2 assigns it from input.sizeBytes
+        // for doc/video), so using the hoisted variable keeps all media kinds consistent.
+        mediaSizeBytes: uploadedSizeBytes,
       };
     } else if (input.type === 'video') {
       body = {
@@ -825,6 +840,9 @@ export const apiChatRepository: ChatRepository = {
         videoWidth: input.width,
         videoHeight: input.height,
         replyToMessageId: input.replyToMessageId,
+        // uploadedSizeBytes === input.sizeBytes here — using the hoisted variable keeps
+        // all media kinds consistent (image/voice also use uploadedSizeBytes).
+        mediaSizeBytes: uploadedSizeBytes,
       };
     } else if (input.type === 'location') {
       body = {
@@ -1243,6 +1261,24 @@ export const apiChatRepository: ChatRepository = {
 
   async registerPushToken(expoPushToken, platform: DevicePlatform) {
     await apiClient.post<void>('/push/tokens', { expoPushToken, platform });
+  },
+
+  async searchMessages(chatId, q, opts) {
+    const params = new URLSearchParams({ q });
+    if (opts?.cursor) params.set('cursor', opts.cursor);
+    if (opts?.limit) params.set('limit', String(opts.limit));
+    return apiClient.get<MessageSearchPage>(
+      `/chats/${chatId}/messages/search?${params.toString()}`,
+    );
+  },
+
+  async getChatStorage(chatId) {
+    return apiClient.get<ChatStorageSummary>(`/chats/${chatId}/storage`);
+  },
+
+  async setChatTheme(threadId, theme) {
+    await apiClient.patch(`/chats/${threadId}/theme`, { theme });
+    notify();
   },
 
   subscribe(listener) {

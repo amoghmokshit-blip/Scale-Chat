@@ -244,6 +244,8 @@ model ChatMember {
   clearedAt            DateTime?  @db.Timestamptz(6)
   /// BigInt sequence the member has read up to, drives unread counts.
   lastReadSequence     BigInt     @default(0)
+  /// Per-user per-chat theme override. Null = default theme.
+  chatTheme            String?    @db.VarChar(32) @map("chat_theme")
 
   chat                 Chat       @relation(fields: [chatId], references: [id], onDelete: Cascade)
   user                 User       @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -293,6 +295,9 @@ model Message {
   /// DOCUMENT.
   documentTitle     String?      @db.VarChar(255)
   documentSizeBytes BigInt?
+  /// Unified media size (IMAGE/VOICE/VIDEO/DOCUMENT) populated on send.
+  /// NULL for pre-existing rows and TEXT/SYSTEM/LOCATION/CONTACT_CARD kinds.
+  mediaSizeBytes    BigInt?
   /// Forward (Tranche 2.E builds the endpoint; column lands here as the schema foundation).
   forwardedFromMessageId String? @db.Uuid
   forwardCount      Int          @default(0)

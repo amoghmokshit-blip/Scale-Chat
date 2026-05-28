@@ -38,6 +38,15 @@ type Props = {
    * up so the screen can route to `votePoll(messageId, optionIds)`.
    */
   onVotePoll?: (messageId: string, optionIds: string[]) => void;
+  /**
+   * Optional per-chat theme overrides (P2-Theme). When omitted, the bubble
+   * falls back to `Brand.chatBubbleMine` / `Brand.chatBubbleTheirs` so
+   * non-themed usage is unchanged.
+   */
+  bubbleColorMine?: string;
+  bubbleColorTheirs?: string;
+  textColorMine?: string;
+  textColorTheirs?: string;
 };
 
 /**
@@ -65,9 +74,17 @@ export function MessageBubble({
   onLongPress,
   onToggleReaction,
   onVotePoll,
+  bubbleColorMine,
+  bubbleColorTheirs,
+  textColorMine,
+  textColorTheirs,
 }: Props) {
-  const bg = isMine ? Brand.chatBubbleMine : Brand.chatBubbleTheirs;
-  const color = isMine ? Brand.chatBubbleMineText : Brand.chatBubbleTheirsText;
+  const bg = isMine
+    ? (bubbleColorMine ?? Brand.chatBubbleMine)
+    : (bubbleColorTheirs ?? Brand.chatBubbleTheirs);
+  const color = isMine
+    ? (textColorMine ?? Brand.chatBubbleMineText)
+    : (textColorTheirs ?? Brand.chatBubbleTheirsText);
   const isTombstone = message.deletedAt != null;
   // Pin pip shows only on a live, pinned message — never on a tombstone
   // (pin-then-delete leaves `pinnedAt` set, but a deleted message shouldn't

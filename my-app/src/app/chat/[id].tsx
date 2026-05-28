@@ -2,7 +2,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   FlatList,
@@ -18,6 +18,7 @@ import { ThemedText } from '@/components/themed-text';
 import { Brand } from '@/constants/theme';
 import { AttachmentSheet } from '@/features/chat/components/attachment-sheet';
 import { ChatHeader } from '@/features/chat/components/chat-header';
+import { ChatThemePicker } from '@/features/chat/components/chat-theme-picker';
 import { ComingSoonSheet } from '@/features/chat/components/coming-soon-sheet';
 import { Composer } from '@/features/chat/components/composer';
 import { DayDivider } from '@/features/chat/components/day-divider';
@@ -82,7 +83,10 @@ type ListItem =
  */
 export default function ChatThreadScreen() {
   const router = useRouter();
-  const { id } = useLocalSearchParams<{ id?: string }>();
+  const { id, highlightSequence } = useLocalSearchParams<{
+    id?: string;
+    highlightSequence?: string;
+  }>();
   const insets = useSafeAreaInsets();
   const {
     thread,
@@ -116,8 +120,9 @@ export default function ChatThreadScreen() {
   const [attachOpen, setAttachOpen] = useState(false);
   const [recorderOpen, setRecorderOpen] = useState(false);
   const [comingSoonKey, setComingSoonKey] = useState<
-    'chatTheme' | 'exportChat' | 'search' | 'starred' | null
+    'exportChat' | 'search' | 'starred' | null
   >(null);
+  const [themePickerOpen, setThemePickerOpen] = useState(false);
 
   // Start a 1-on-1 call (Tranche 2.I): mint a token + navigate to the CallScreen.
   // The server rings the callee (socket + push). `id` is the chat/thread id.
@@ -151,6 +156,30 @@ export default function ChatThreadScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [id, router],
   );
+  // ── P2-Theme: derive the active theme token ─────────────────────────────────
+  // Intentionally dark-palette regardless of system light/dark mode —
+  // WhatsApp-like wallpaper behavior (theme-controlled, not color-scheme-controlled).
+  const themeToken =
+    Brand.chatThemes[(thread?.chatTheme ?? 'default') as keyof typeof Brand.chatThemes] ??
+    Brand.chatThemes.default;
+
+  async function handleSetTheme(theme: string | null) {
+    if (!id) return;
+    // Optimistic: apply immediately via thread mutation through the repo.
+    const prev = thread?.chatTheme ?? null;
+    try {
+      await chatRepository.setChatTheme?.(id, theme);
+    } catch {
+      // On failure, revert by re-setting to the prior value.
+      try {
+        await chatRepository.setChatTheme?.(id, prev);
+      } catch {
+        // best-effort revert — ignore secondary failure
+      }
+      Alert.alert(ChatCopy.theme.applyFailed, '');
+    }
+  }
+
   // Phase C state. Initial mute / block state isn't yet plumbed through
   // `ChatDetailDto`; the screen defaults to false and flips on user action.
   // Plumbing the initial state lands when Phase E (push) needs to read it.
@@ -174,6 +203,29 @@ export default function ChatThreadScreen() {
     }, [id])
   );
 
+  // P2-Search: when the thread is opened (or re-focused) with a `highlightSequence`
+  // param (set by chat/search.tsx on hit tap), scroll to that message if it is already
+  // in the loaded list. Out-of-window sequences (not yet loaded via loadOlder) are
+  // deliberately ignored in this tranche — deep back-pagination is deferred.
+  //
+  // The ref prevents re-scrolling on every `items` change (incoming message, read
+  // receipt, reaction) — once we've scrolled to the hit for a given sequence we mark
+  // it handled and skip all subsequent fires with the same `highlightSequence` value.
+  const handledHighlightRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!highlightSequence) return;
+    // Already scrolled to this highlight — don't fight onContentSizeChange's scrollToEnd.
+    if (handledHighlightRef.current === highlightSequence) return;
+    const seq = Number(highlightSequence);
+    if (Number.isNaN(seq)) return;
+    const index = items.findIndex(
+      (item) => item.kind === 'message' && item.message.sequence === seq,
+    );
+    if (index < 0) return; // message not in loaded window — do nothing this tranche
+    listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
+    handledHighlightRef.current = highlightSequence;
+  }, [highlightSequence, items]);
+
   const renderItem: ListRenderItem<ListItem> = ({ item }) => {
     if (item.kind === 'divider') return <DayDivider label={item.label} />;
     return (
@@ -186,6 +238,10 @@ export default function ChatThreadScreen() {
         onLongPress={setSheetMessage}
         onToggleReaction={(emoji) => void handleTogglePill(item.message, emoji)}
         onVotePoll={(messageId, optionIds) => void handleVotePoll(messageId, optionIds)}
+        bubbleColorMine={themeToken.mine}
+        bubbleColorTheirs={themeToken.theirs}
+        textColorMine={themeToken.mineText}
+        textColorTheirs={themeToken.theirsText}
       />
     );
   };
@@ -504,7 +560,7 @@ export default function ChatThreadScreen() {
 
   if (loading || !thread) {
     return (
-      <View style={styles.root}>
+      <View style={[styles.root, { backgroundColor: Brand.chatBody }]}>
         <StatusBar barStyle="light-content" backgroundColor={Brand.chatHeaderTop} />
         <View style={styles.loading}>
           <ThemedText style={styles.loadingText}>Loading conversation…</ThemedText>
@@ -514,7 +570,9 @@ export default function ChatThreadScreen() {
   }
 
   return (
-    <View style={styles.root}>
+    // Themes are intentionally dark-palette regardless of system light/dark mode
+    // (WhatsApp-like wallpaper behavior — thread background is theme-controlled).
+    <View style={[styles.root, { backgroundColor: themeToken.body }]}>
       <StatusBar barStyle="light-content" backgroundColor={Brand.chatHeaderTop} />
       <ChatHeader
         counterpart={thread.counterpart}
@@ -541,6 +599,12 @@ export default function ChatThreadScreen() {
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+          onScrollToIndexFailed={() => {
+            // Safe fallback: scroll to the top so the list doesn't lock up.
+            // This fires when `highlightSequence` is beyond the loaded window
+            // (out-of-window deep-link deferred to a future tranche).
+            listRef.current?.scrollToOffset({ offset: 0, animated: false });
+          }}
           onScroll={(e) => {
             if (e.nativeEvent.contentOffset.y < 80 && hasMoreOlder && !loadingOlder) {
               void loadOlder();
@@ -643,7 +707,7 @@ export default function ChatThreadScreen() {
         onMute={() => setMutePickerOpen(true)}
         onUnmute={() => void handleMute(null)}
         onStarred={() => setComingSoonKey('starred')}
-        onWallpaper={() => setComingSoonKey('chatTheme')}
+        onWallpaper={() => setThemePickerOpen(true)}
         onClearChat={() =>
           Alert.alert(
             'Clear this chat?',
@@ -683,12 +747,11 @@ export default function ChatThreadScreen() {
         onPick={(until) => void handleMute(until)}
       />
 
-      <ComingSoonSheet
-        visible={comingSoonKey === 'chatTheme'}
-        icon="droplet"
-        title={ChatCopy.comingSoon.chatTheme.title}
-        body={ChatCopy.comingSoon.chatTheme.body}
-        onClose={() => setComingSoonKey(null)}
+      <ChatThemePicker
+        visible={themePickerOpen}
+        currentTheme={thread.chatTheme}
+        onSelect={(theme) => void handleSetTheme(theme)}
+        onClose={() => setThemePickerOpen(false)}
       />
 
       <ComingSoonSheet
@@ -762,7 +825,8 @@ function groupForRender(messages: Message[], byId: Map<string, Message>): ListIt
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: Brand.chatBody,
+    // backgroundColor is applied dynamically via themeToken.body (P2-Theme);
+    // the fallback is Brand.chatBody (= Brand.chatThemes.default.body = '#000000').
   },
   body: {
     flex: 1,

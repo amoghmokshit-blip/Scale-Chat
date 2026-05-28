@@ -37,6 +37,11 @@ export type Thread = {
   isPinned?: boolean;
   isArchived?: boolean;
   isFavourite?: boolean;
+  /**
+   * Per-user per-chat theme override (P2-Theme). Null / undefined = default theme.
+   * Values mirror `ChatTheme` from `@scalechat/shared`.
+   */
+  chatTheme?: string | null;
 };
 
 export type MessageStatus =

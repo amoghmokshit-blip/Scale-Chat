@@ -150,9 +150,67 @@ export const Brand = {
   /** Voice playback progress fill (lime for played, muted for unplayed). */
   chatVoicePlayed: '#B3EF2B',
   chatVoiceUnplayed: 'rgba(237,237,237,0.45)',
+  /** Contact Profile v2 (Figma 1:3877). */
+  profileBg: '#09080e',
+  profileBackCircle: '#d7daff',
+  destructiveRed: '#ff2a2d',
+
+  /**
+   * Per-chat theme token map (P2-Theme). Each entry fully describes one chat
+   * "wallpaper": background slab + mine/theirs bubble surfaces + their text colors.
+   *
+   * These are intentionally dark-palette regardless of the device light/dark
+   * mode — matching WhatsApp's wallpaper behavior where the thread background
+   * is theme-controlled, not system-color-scheme-controlled.
+   *
+   * KEEP KEYS IN SYNC WITH `ChatThemeEnum` in `@scalechat/shared`.
+   */
+  chatThemes: {
+    /** Default — matches the existing Figma dark thread (Brand.chatBody + chatBubble*). */
+    default: {
+      body: '#000000',
+      mine: '#5360EC',
+      theirs: '#EDEDED',
+      mineText: '#EDEDED',
+      theirsText: '#313131',
+    },
+    /** Midnight — deep navy with GitHub-blue mine bubbles + silver theirs. */
+    midnight: {
+      body: '#0D1117',
+      mine: '#1F6FEB',
+      theirs: '#C9D1D9',
+      mineText: '#FFFFFF',
+      theirsText: '#111827',
+    },
+    /** Forest — dark jungle with deep-green mine + mint theirs. */
+    forest: {
+      body: '#0D1F1A',
+      mine: '#2D6A4F',
+      theirs: '#D8F3DC',
+      mineText: '#FFFFFF',
+      theirsText: '#1B4332',
+    },
+    /** Sunset — dark maroon with crimson mine + apricot theirs. */
+    sunset: {
+      body: '#1A0D0D',
+      mine: '#AE2012',
+      theirs: '#FFE8D6',
+      mineText: '#FFFFFF',
+      theirsText: '#6B1010',
+    },
+  },
 } as const;
 
 export type BrandColor = keyof typeof Brand;
+
+/** Shape of a single chat-theme token entry (P2-Theme). */
+export type ChatThemeToken = {
+  body: string;
+  mine: string;
+  theirs: string;
+  mineText: string;
+  theirsText: string;
+};
 
 /**
  * Typography. The Figma uses Jeko-Black + Poppins, neither of which ship with RN/Expo by
