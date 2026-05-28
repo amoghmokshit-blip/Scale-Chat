@@ -27,6 +27,13 @@ export default async function globalSetup(): Promise<void> {
   process.env.DATABASE_URL = TEST_DATABASE_URL;
   process.env.REDIS_URL = TEST_REDIS_URL;
   process.env.ENABLE_DEV_OTP = 'false';
+  // Country allow-list (Phase 2 OTP) — locked to India so the auth-otp suite
+  // can assert rejections against non-IN numbers. Set HERE (not in a per-suite
+  // beforeAll) because `NestConfigModule.forRoot()` validates the env at
+  // module-import time, which happens before any Jest beforeAll runs.
+  // All existing e2e suites seed users with +91 numbers, so this is a no-op
+  // for them; the country gate accepts everything they create.
+  process.env.OTP_ALLOWED_COUNTRIES = process.env.OTP_ALLOWED_COUNTRIES ?? 'IN';
   // Tell Prisma to suppress the cosmetic update-check spinner in CI logs.
   process.env.PRISMA_HIDE_UPDATE_MESSAGE = 'true';
 

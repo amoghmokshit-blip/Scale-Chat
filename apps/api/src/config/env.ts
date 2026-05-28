@@ -24,10 +24,25 @@ export const envSchema = z.object({
   MSG91_TEMPLATE_ID: z.string().optional().default(''),
   MSG91_BASE_URL: z.string().url().default('https://control.msg91.com'),
 
+  // ─── Twilio Verify (worldwide OTP — Phase 2 of the OTP migration) ────────
+  //
+  // When all three vars are set, `AuthModule` binds the `TwilioVerifyProvider`
+  // instead of the dev/MSG91 path. Empty in dev so contributors boot without
+  // provisioning a Twilio account; `loadEnv()` refuses to start prod without
+  // them once `NODE_ENV=production` lands. See `docs/progress/otp-research.md`.
+  TWILIO_ACCOUNT_SID: z.string().optional().default(''),
+  TWILIO_AUTH_TOKEN: z.string().optional().default(''),
+  TWILIO_VERIFY_SERVICE_SID: z.string().optional().default(''),
+
   OTP_REQUEST_PER_PHONE_PER_HOUR: z.coerce.number().int().positive().default(5),
   OTP_REQUEST_PER_IP_PER_HOUR: z.coerce.number().int().positive().default(20),
   OTP_VERIFY_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
   OTP_TTL_SECONDS: z.coerce.number().int().positive().default(300),
+
+  // Comma-separated ISO 3166-1 alpha-2 country codes. Empty = allow all
+  // (dev default). In prod set to the launched markets only — this is the
+  // highest-leverage SMS-pumping (AIT) defense per the BRD.
+  OTP_ALLOWED_COUNTRIES: z.string().default(''),
 
   ENABLE_DEV_OTP: z
     .union([z.boolean(), z.string()])
@@ -99,6 +114,20 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
   // Refuse to start prod with dev-OTP enabled — a misconfig that would let anyone log in.
   if (parsed.data.NODE_ENV === 'production' && parsed.data.ENABLE_DEV_OTP) {
     throw new Error('ENABLE_DEV_OTP must be false when NODE_ENV=production');
+  }
+  // Refuse to start prod without a real OTP sender. Without Twilio creds we
+  // would fall back to the dev/MSG91 path, which logs the OTP to stdout when
+  // its own creds are absent — silently broken in production.
+  if (parsed.data.NODE_ENV === 'production') {
+    const hasTwilio =
+      parsed.data.TWILIO_ACCOUNT_SID && parsed.data.TWILIO_AUTH_TOKEN && parsed.data.TWILIO_VERIFY_SERVICE_SID;
+    const hasMsg91 = parsed.data.MSG91_AUTH_KEY && parsed.data.MSG91_TEMPLATE_ID;
+    if (!hasTwilio && !hasMsg91) {
+      throw new Error(
+        'Production requires either TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN/TWILIO_VERIFY_SERVICE_SID (preferred) ' +
+          'or MSG91_AUTH_KEY/MSG91_TEMPLATE_ID (legacy India-only fallback).',
+      );
+    }
   }
   return parsed.data;
 }

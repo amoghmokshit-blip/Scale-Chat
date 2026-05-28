@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   HttpCode,
@@ -32,8 +33,8 @@ import { TokensService } from './services/tokens.service';
  * *obtains* a JWT in the first place.
  *
  * Routes:
- *   POST /auth/otp/request   — production-ready
- *   POST /auth/otp/verify    — STUB (returns 501 unless ENABLE_DEV_OTP=true)
+ *   POST /auth/otp/request   — production-ready (country allow-list + rate limits + provider seam)
+ *   POST /auth/otp/verify    — production-ready (provider seam: Twilio Verify or Dev/MSG91)
  *   POST /auth/refresh       — production-ready (family-rotation + replay detect)
  *   POST /auth/signout       — production-ready
  */
@@ -64,6 +65,15 @@ export class AuthController {
     });
 
     if (!outcome.ok) {
+      // Country gate is a client-side problem (unsupported market) → 400.
+      // Everything else is a transient/server condition → 401 to match the
+      // existing surface.
+      if (outcome.reason === 'country_not_supported') {
+        throw new BadRequestException({
+          code: outcome.reason,
+          message: 'Sign-ups from this country aren’t supported yet.',
+        });
+      }
       const message =
         outcome.reason === 'rate_limited_phone'
           ? 'Too many OTP requests for this number. Try again later.'
@@ -89,11 +99,13 @@ export class AuthController {
    *
    * Flow:
    *   1. In dev (`ENABLE_DEV_OTP=true`) and when the request matches the
-   *      configured `DEV_OTP_CODE`, accept without hitting Redis so contributors
-   *      can run the mobile flow without provisioning an OTP first. Guarded by
-   *      `loadEnv()` — refuses to start prod with `ENABLE_DEV_OTP=true`.
-   *   2. Otherwise delegate to `OtpService.verify()` which performs the
-   *      argon2-compare + attempts increment + Redis burn.
+   *      configured `DEV_OTP_CODE`, accept without hitting the provider so
+   *      contributors can run the mobile flow without provisioning an OTP
+   *      first. Guarded by `loadEnv()` — refuses to start prod with
+   *      `ENABLE_DEV_OTP=true`.
+   *   2. Otherwise delegate to `OtpService.verify()` which delegates to the
+   *      bound `OtpVerificationProvider` (Twilio Verify in prod when creds
+   *      are set, DevVerifyProvider — argon2 + Redis + MSG91 — otherwise).
    *   3. On success upsert the User row and mint a fresh JWT pair via
    *      `TokensService.issueNew()`.
    */

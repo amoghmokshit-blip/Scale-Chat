@@ -1,7 +1,7 @@
 # OTP — Worldwide provider research + migration design
 
-> **Status:** Design approved (research complete), implementation **not started**. No codebase changes have been made.
-> **Date:** 2026-05-27. **Author:** research synthesis from 10 parallel provider deep-dives (all sourced to official 2026 docs/pricing; see § Sources).
+> **Status:** Phase 1 + Phase 2 **implemented and landed 2026-05-28** (provider seam + Twilio + country allow-list + e2e). Phase 3 (Twilio console config — Fraud Guard / Geo-Permissions / Verify Service SID) is a manual step gated on each market's registration clearing; Phase 4 (per-market device verification) follows. Live Twilio smoke test is `it.todo` in `apps/api/test/auth-otp.e2e-spec.ts` until creds are provisioned.
+> **Date:** 2026-05-27 (design) · 2026-05-28 (implementation). **Author:** research synthesis from 10 parallel provider deep-dives (all sourced to official 2026 docs/pricing; see § Sources).
 > **Scope:** Replace the India-only MSG91 OTP sender with a **worldwide** verification provider. **Calls (LiveKit) are explicitly out of scope** — see § Why calls don't change.
 
 This doc operationalizes the move from MSG91 (India-only SMS) to a global OTP stack as part of the worldwide launch. It is the canonical handoff for the OTP migration slice.
